@@ -1,0 +1,27 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(uuid())
+  username      String   @unique
+  collegeName   String
+  eloRating     Int      @default(1200)
+  matchesPlayed Int      @default(0)
+  matchesWon    Int      @default(0)
+  createdAt     DateTime @default(now())
+}
+
+model MatchHistory {
+  id          String   @id @default(uuid())
+  winnerId    String
+  loserId     String
+  problemName String
+  duration    Int      // time taken in seconds
+  createdAt   DateTime @default(now())
+}
