@@ -87,6 +87,11 @@ io.on("connection", (socket) => {
     console.log(`🚀 Match started in room ${roomId}`);
   });
 
+  // ── Code Update (typing indicator) ──
+  socket.on("code_update", ({ roomId, userId }) => {
+    socket.to(roomId).emit("opponent_typing", { userId });
+  });
+
   // ── Disconnect ──
   socket.on("disconnect", () => {
     console.log(`🔌 Client disconnected: ${socket.id}`);
