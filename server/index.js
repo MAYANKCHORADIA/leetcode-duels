@@ -48,6 +48,18 @@ const auth = betterAuth({
       secure: true,
       httpOnly: true,
     },
+  },
+  databaseHooks: {
+    session: {
+      create: {
+        after: async (session) => {
+          await prisma.user.update({
+            where: { id: session.userId },
+            data: { loginCount: { increment: 1 } }
+          });
+        }
+      }
+    }
   }
 });
 

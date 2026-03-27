@@ -20,6 +20,7 @@ model User {
   eloRating     Int       @default(1200)
   matchesPlayed Int       @default(0)
   matchesWon    Int       @default(0)
+  loginCount    Int       @default(0)
   
   sessions      Session[]
   accounts      Account[]

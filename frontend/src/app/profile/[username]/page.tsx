@@ -105,6 +105,10 @@ export default function ProfilePage() {
                     {profile.matchesPlayed > 0 ? Math.round((profile.matchesWon / profile.matchesPlayed) * 100) : 0}%
                   </div>
                 </div>
+                <div>
+                  <div className="text-sm text-muted uppercase tracking-wider mb-1">Logins</div>
+                  <div className="text-2xl font-bold font-mono text-accent">{profile.loginCount || 0}</div>
+                </div>
               </div>
             </div>
           </div>
