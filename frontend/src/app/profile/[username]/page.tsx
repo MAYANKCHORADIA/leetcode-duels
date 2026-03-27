@@ -3,6 +3,9 @@
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 
+// Added dynamic backend URL
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8080";
+
 interface Match {
   id: string;
   problemName: string;
@@ -19,6 +22,7 @@ interface UserProfile {
   eloRating: number;
   matchesPlayed: number;
   matchesWon: number;
+  loginCount?: number; // <--- Added this to fix the TypeScript error
   matchHistory: Match[];
 }
 
@@ -29,7 +33,8 @@ export default function ProfilePage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch(`http://localhost:8080/api/users/profile/${username}`)
+    // Replaced localhost with the dynamic BACKEND_URL
+    fetch(`${BACKEND_URL}/api/users/profile/${username}`)
       .then((res) => {
         if (!res.ok) throw new Error("Not found");
         return res.json();

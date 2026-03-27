@@ -46,7 +46,7 @@ export default function OnboardingPage() {
           name: cleanUsername,
           username: cleanUsername,
           collegeName: cleanCollege,
-        });
+        }as any);
 
         if (authRes.error) {
           throw new Error(authRes.error.message || "Failed to enter arena.");
