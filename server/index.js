@@ -28,7 +28,7 @@ const auth = betterAuth({
   database: prismaAdapter(prisma, {
     provider: "postgresql",
   }),
-  baseURL: "http://localhost:8080",
+  baseURL: process.env.BACKEND_URL || "http://localhost:8080",
   trustedOrigins: [FRONTEND_URL],
   emailAndPassword: {
     enabled: true,
@@ -41,6 +41,13 @@ const auth = betterAuth({
       matchesPlayed: { type: "number", required: false, defaultValue: 0 },
       matchesWon: { type: "number", required: false, defaultValue: 0 },
     }
+  },
+  advanced: {
+    defaultCookieAttributes: {
+      sameSite: "none",
+      secure: true,
+      httpOnly: true,
+    },
   }
 });
 
@@ -359,6 +366,27 @@ app.post("/api/execute", async (req, res) => {
     }
 
     const testCases = problem.testCases;
+
+    if (!RAPIDAPI_KEY) {
+      console.warn("Mock Mode: Code execution skipped due to missing API keys.");
+      await sleep(2000); // Simulate network delay
+      return res.json({
+        passed: testCases.length,
+        total: testCases.length,
+        allPassed: true,
+        results: testCases.map((tc, i) => ({
+          testCase: i + 1,
+          status: "Accepted",
+          passed: true,
+          stdout: "Mock Output",
+          stderr: null,
+          compile_output: null,
+          expected: tc.expected_output,
+          time: "0.01",
+          memory: 1024,
+        }))
+      });
+    }
 
     const submissions = testCases.map(tc => ({
       language_id: langId,

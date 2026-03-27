@@ -12,6 +12,7 @@ export function getSocket(): Socket {
     socket = io(BACKEND_URL, {
       autoConnect: true,
       transports: ["websocket", "polling"],
+      withCredentials: true,
     });
   }
   return socket;
