@@ -3,7 +3,10 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useUserStore } from "@/store/userStore";
+import { useRoomStore } from "@/store/roomStore";
 import { getSocket } from "@/lib/socket";
+import FriendsSidebar from "@/components/FriendsSidebar";
+import { authClient } from "@/lib/authClient";
 
 // ─── Constants ──────────────────────────────────────────────────────
 const DIFFICULTIES = ["Easy", "Medium", "Hard"] as const;
@@ -24,11 +27,15 @@ const TIME_LIMITS = [15, 30, 45] as const;
 type View = "dashboard" | "waiting" | "joining";
 
 export default function DashboardPage() {
+  const { data, isPending } = authClient.useSession();
   const user = useUserStore((s) => s.user);
+  const setUser = useUserStore((s) => s.setUser);
+  const setRoomState = useRoomStore((s) => s.setRoomState);
   const router = useRouter();
 
   // ── UI State ──
-  const [view, setView] = useState<View>("dashboard");
+  const [view, setView] = useState<"dashboard" | "waiting" | "joining">("dashboard");
+  const [incomingChallenge, setIncomingChallenge] = useState<{ roomId: string, challenger: string } | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [roomId, setRoomId] = useState("");
   const [joinRoomId, setJoinRoomId] = useState("");
@@ -41,10 +48,20 @@ export default function DashboardPage() {
   const [topic, setTopic] = useState<string>(TOPICS[0]);
   const [timeLimit, setTimeLimit] = useState<number>(TIME_LIMITS[1]);
 
-  // ── Redirect if no user ──
+  // ── Sync Session to Local Store ──
   useEffect(() => {
-    if (!user) router.replace("/");
-  }, [user, router]);
+    if (data?.user && !user) {
+      setUser(data.user as any);
+    }
+  }, [data, user, setUser]);
+
+  // ── Handle Unauthorized State (Redirect) ──
+  useEffect(() => {
+    if (!isPending && !data?.session && !user) {
+      router.replace("/");
+    }
+  }, [isPending, data, user, router]);
+
 
   // ── Socket listeners ──
   useEffect(() => {
@@ -56,7 +73,8 @@ export default function DashboardPage() {
       setView("waiting");
     };
 
-    const onMatchStart = ({ roomId }: { roomId: string }) => {
+    const onMatchStart = ({ roomId, problem }: { roomId: string, problem: any }) => {
+      setRoomState(roomId, problem);
       router.push(`/room/${roomId}`);
     };
 
@@ -65,16 +83,26 @@ export default function DashboardPage() {
       setIsJoining(false);
     };
 
+    const onChallengeReceived = ({ roomId, challenger }: { roomId: string, challenger: string }) => {
+      setIncomingChallenge({ roomId, challenger });
+    };
+
+    if (user) {
+      socket.emit("identify", user.id);
+    }
+
     socket.on("room_created", onRoomCreated);
-    socket.on("match_start", onMatchStart);
     socket.on("room_error", onRoomError);
+    socket.on("match_start", onMatchStart);
+    socket.on("challenge_received", onChallengeReceived);
 
     return () => {
       socket.off("room_created", onRoomCreated);
-      socket.off("match_start", onMatchStart);
       socket.off("room_error", onRoomError);
+      socket.off("match_start", onMatchStart);
+      socket.off("challenge_received", onChallengeReceived);
     };
-  }, []);
+  }, [user, router, setRoomState]);
 
   // ── Actions ──
   const handleCreateRoom = useCallback(() => {
@@ -102,34 +130,86 @@ export default function DashboardPage() {
     setTimeout(() => setIsJoining(false), 3000);
   }, [user, joinRoomId, isJoining]);
 
+  const handleChallenge = useCallback((friendId: string) => {
+    if (!user) return;
+    const currentUser = user;
+    const socket = getSocket();
+    
+    // We must listen for the room creation response exactly once for this challenge
+    const onRoomCreated = (roomId: string) => {
+       socket.emit("send_challenge", { friendId, roomId, challenger: currentUser.username });
+       socket.off("room_created", onRoomCreated);
+    };
+    socket.on("room_created", onRoomCreated);
+
+    socket.emit("create_room", {
+      difficulty,
+      topic,
+      timeLimit,
+      user: { id: currentUser.id, username: currentUser.username },
+    });
+  }, [user, difficulty, topic, timeLimit]);
+
   const copyRoomId = useCallback(() => {
     navigator.clipboard.writeText(roomId);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }, [roomId]);
 
+  // Handle Loading Session State
+  if (isPending) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-grid">
+        <div className="animate-spin text-primary rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
+
+  // Handle Unauthorized State (Render)
+  if (!isPending && !data?.session && !user) {
+    return null;
+  }
+
+  // Double check user hydration
   if (!user) return null;
 
   return (
-    <main className="flex-1 flex flex-col items-center px-4 py-10">
-      {/* Ambient glow */}
-      <div className="fixed top-0 left-1/2 -translate-x-1/2 w-[800px] h-[400px] rounded-full bg-primary/5 blur-[150px] pointer-events-none" />
+    <div className="h-screen flex flex-col bg-grid">
+      {/* Navigation Bar */}
+      <header className="w-full bg-surface border-b border-border p-4 px-6 flex justify-between items-center z-50">
+        <div className="font-bold text-xl text-transparent bg-clip-text bg-gradient-to-r from-primary to-accent">LeetCode Duels</div>
+        <div className="flex items-center gap-6">
+          <button onClick={() => router.push(`/profile/${user.username}`)} className="text-sm font-semibold hover:text-primary transition-colors text-foreground/80">
+            Profile
+          </button>
+          <button onClick={() => { useUserStore.getState().clearUser(); router.replace("/") }} className="text-sm font-semibold text-destructive hover:text-destructive/80 transition-colors">
+            Logout
+          </button>
+        </div>
+      </header>
 
-      {/* ═══════════════ DASHBOARD VIEW ═══════════════ */}
-      {view === "dashboard" && (
-        <div className="relative w-full max-w-2xl animate-slide-up">
-          {/* User Info Card */}
-          <div className="bg-surface border border-border rounded-2xl p-6 mb-8 glow-purple">
-            <div className="flex items-center justify-between">
-              <div>
-                <h1 className="text-xl font-bold text-foreground">
-                  Welcome back,{" "}
-                  <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-                    {user.username}
-                  </span>
-                </h1>
-                <p className="text-muted text-sm mt-1">{user.collegeName}</p>
-              </div>
+      <div className="flex-1 flex overflow-hidden">
+        {view === "dashboard" && <FriendsSidebar currentUser={user} onChallenge={handleChallenge} />}
+        
+        <main className="flex-1 overflow-y-auto px-4 py-10 flex flex-col items-center relative">
+          {/* Ambient glow */}
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[400px] rounded-full bg-primary/5 blur-[150px] pointer-events-none" />
+
+          {/* ═══════════════ DASHBOARD VIEW ═══════════════ */}
+          {view === "dashboard" && (
+            <div className="relative w-full max-w-2xl animate-slide-up">
+              {/* User Info Card */}
+              <div className="bg-surface border border-border rounded-2xl p-6 mb-8 glow-purple">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h1 className="text-xl font-bold text-foreground">
+                      Welcome back,{" "}
+                      <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+                        {user.username}
+                      </span>
+                    </h1>
+                    <p className="text-muted text-sm mt-1">{user.collegeName}</p>
+                  </div>
               <div className="text-right flex flex-col items-end">
                 <div className="text-3xl font-bold font-mono bg-gradient-to-b from-foreground to-muted bg-clip-text text-transparent">
                   {user.eloRating}
@@ -419,6 +499,27 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
-    </main>
+        </main>
+      </div>
+
+      {/* Incoming Challenge Modal */}
+      {incomingChallenge && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center animate-fade-in px-4">
+          <div className="bg-surface p-8 rounded-2xl border border-primary/50 text-center max-w-sm w-full glow-purple">
+            <h3 className="text-xl text-foreground font-bold mb-2">⚔️ Challenge Received</h3>
+            <p className="text-muted text-sm mb-6"><span className="text-primary font-semibold">{incomingChallenge.challenger}</span> has challenged you to a duel!</p>
+            <div className="flex gap-4 justify-center">
+              <button onClick={() => {
+                const socket = getSocket();
+                socket.emit("join_room", { roomId: incomingChallenge.roomId, user: {id: user.id, username: user.username} });
+                setIncomingChallenge(null);
+                setIsJoining(true); // show joining state temporarily until match_start redirects
+              }} className="bg-primary text-white font-semibold flex-1 py-2.5 rounded-xl hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20">Accept</button>
+              <button onClick={() => setIncomingChallenge(null)} className="bg-destructive/10 text-destructive border border-destructive/20 font-semibold flex-1 py-2.5 rounded-xl hover:bg-destructive/20 transition-colors">Decline</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

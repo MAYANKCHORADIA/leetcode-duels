@@ -3,7 +3,9 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useUserStore } from "@/store/userStore";
+import { useRoomStore } from "@/store/roomStore";
 import { getSocket } from "@/lib/socket";
+import { authClient } from "@/lib/authClient";
 import Editor from "@monaco-editor/react";
 
 // ─── Types ──────────────────────────────────────────────────────────
@@ -36,40 +38,8 @@ interface MatchOverData {
   duration: number;
 }
 
-// ─── Hardcoded Problem ──────────────────────────────────────────────
-const PROBLEM = {
-  id: "two_sum",
-  title: "1. Two Sum",
-  difficulty: "Easy",
-  description: `Given an array of integers \`nums\` and an integer \`target\`, return indices of the two numbers such that they add up to \`target\`.
-
-You may assume that each input would have **exactly one solution**, and you may not use the same element twice.
-
-You can return the answer in any order.`,
-  examples: [
-    {
-      input: "nums = [2,7,11,15], target = 9",
-      output: "[0,1]",
-      explanation: "Because nums[0] + nums[1] == 9, we return [0, 1].",
-    },
-    {
-      input: "nums = [3,2,4], target = 6",
-      output: "[1,2]",
-      explanation: "",
-    },
-    {
-      input: "nums = [3,3], target = 6",
-      output: "[0,1]",
-      explanation: "",
-    },
-  ],
-  constraints: [
-    "2 ≤ nums.length ≤ 10⁴",
-    "-10⁹ ≤ nums[i] ≤ 10⁹",
-    "-10⁹ ≤ target ≤ 10⁹",
-    "Only one valid answer exists.",
-  ],
-};
+// ─── Dynamic Problem ──────────────────────────────────────────────
+// Problem is dynamically passed via Zustand roomStore
 
 const DEFAULT_CODE = `#include <bits/stdc++.h>
 using namespace std;
@@ -95,7 +65,32 @@ const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:808
 export default function RoomPage() {
   const { id: roomId } = useParams<{ id: string }>();
   const router = useRouter();
+  
+  const { data, isPending } = authClient.useSession();
   const user = useUserStore((s) => s.user);
+  const setUser = useUserStore((s) => s.setUser);
+  
+  const problem = useRoomStore((s) => s.problem);
+
+  useEffect(() => {
+    if (!problem) router.replace("/dashboard");
+  }, [problem, router]);
+
+  // ── Sync Session to Local Store ──
+  useEffect(() => {
+    if (data?.user && !user) {
+      setUser(data.user as any);
+    }
+  }, [data, user, setUser]);
+
+  // ── Handle Unauthorized State (Redirect) ──
+  useEffect(() => {
+    if (!isPending && !data?.session && !user) {
+      router.replace("/");
+    }
+  }, [isPending, data, user, router]);
+
+
 
   // Editor state
   const [code, setCode] = useState(DEFAULT_CODE);
@@ -107,6 +102,7 @@ export default function RoomPage() {
   const [execResult, setExecResult] = useState<ExecuteResponse | null>(null);
   const [execError, setExecError] = useState("");
   const [consoleOpen, setConsoleOpen] = useState(false);
+  const [showForfeitModal, setShowForfeitModal] = useState(false);
 
   // Opponent & Match state
   const [opponentTyping, setOpponentTyping] = useState(false);
@@ -151,21 +147,22 @@ export default function RoomPage() {
   }, []);
 
   // ── Debounced code_update emitter ──
-  const handleEditorChange = useCallback(
-    (value: string | undefined) => {
-      if (matchOverData) return; // Disable typing if match over
-      
-      const newCode = value ?? "";
-      setCode(newCode);
+  const handleEditorChange = useCallback((val: string | undefined) => {
+    if (matchOverData) return; // Disable typing if match over
+    const newVal = val || "";
+    setCode(newVal);
 
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(() => {
-        const socket = getSocket();
-        socket.emit("code_update", { roomId, userId: user?.id });
-      }, 300);
-    },
-    [roomId, user, matchOverData]
-  );
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      const socket = getSocket();
+      socket.emit("code_update", { roomId, userId: user?.id });
+    }, 300);
+  }, [roomId, user, matchOverData]);
+  const handleForfeit = useCallback(() => {
+    const socket = getSocket();
+    socket.emit("forfeit_match", { roomId, userId: user?.id });
+    setShowForfeitModal(false);
+  }, [roomId, user]);
 
   // ── Execute code ──
   const executeCode = useCallback(
@@ -184,7 +181,7 @@ export default function RoomPage() {
           body: JSON.stringify({
             source_code: code,
             language_id: language,
-            problem_id: PROBLEM.id,
+            problem_id: problem?.id || "two_sum",
           }),
         });
 
@@ -220,8 +217,36 @@ export default function RoomPage() {
     [code, language, roomId, user]
   );
 
+  // Handle Loading Session State
+  if (isPending) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-grid">
+        <div className="animate-spin text-primary rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
+
+  // Handle Unauthorized State (Render)
+  if (!isPending && !data?.session && !user) {
+    return null;
+  }
+
   return (
     <main className="flex-1 flex flex-col h-screen overflow-hidden relative">
+      {/* Forfeit Confirmation Modal */}
+      {showForfeitModal && !matchOverData && (
+        <div className="absolute inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-surface border border-destructive/30 shadow-2xl shadow-destructive/10 rounded-2xl p-6 text-center animate-fade-in">
+            <h3 className="text-xl font-bold text-foreground mb-2">Are you sure?</h3>
+            <p className="text-muted text-sm mb-6">You will instantly lose Elo rating and the match will end.</p>
+            <div className="flex gap-4 justify-center">
+               <button onClick={handleForfeit} className="flex-1 py-2.5 rounded-xl bg-destructive font-semibold text-white hover:bg-destructive/90 transition-colors shadow-lg shadow-destructive/20">Yes, Forfeit</button>
+               <button onClick={() => setShowForfeitModal(false)} className="flex-1 py-2.5 rounded-xl bg-surface border border-border font-semibold hover:bg-background transition-colors">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ─── Match Over Modal ─── */}
       {matchOverData && (
         <div className="absolute inset-0 z-50 bg-background/80 backdrop-blur flex items-center justify-center p-4">
@@ -286,15 +311,24 @@ export default function RoomPage() {
       )}
 
       {/* ─── Top Bar ─── */}
-      <header className="flex items-center justify-between px-5 py-3 bg-surface border-b border-border shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-accent flex items-center justify-center text-white text-sm font-bold">
-            ⚔
+      <header className="flex items-center justify-between px-5 py-3 bg-surface border-b border-border shrink-0 z-10">
+        <div className="flex items-center gap-5">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-accent flex items-center justify-center text-white text-sm font-bold shadow-sm shadow-primary/20">
+              ⚔
+            </div>
+            <span className="font-semibold text-foreground text-sm">
+              Room{" "}
+              <span className="font-mono text-primary">{roomId}</span>
+            </span>
           </div>
-          <span className="font-semibold text-foreground text-sm">
-            Room{" "}
-            <span className="font-mono text-primary">{roomId}</span>
-          </span>
+          
+          <button 
+            onClick={() => setShowForfeitModal(true)} 
+            className="text-xs font-bold px-3 py-1.5 rounded-lg bg-destructive/10 text-destructive border border-destructive/20 hover:bg-destructive hover:text-white transition-colors flex items-center gap-1 shadow-sm"
+          >
+            🏳️ Forfeit
+          </button>
         </div>
 
         {/* Status badges */}
@@ -331,58 +365,28 @@ export default function RoomPage() {
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 min-h-0">
         {/* ═══════ LEFT: Problem Description ═══════ */}
         <section className="overflow-y-auto border-r border-border p-6 lg:p-8 scrollbar-thin">
-          <div className="flex items-center gap-3 mb-6">
-            <h1 className="text-xl font-bold text-foreground">
-              {PROBLEM.title}
-            </h1>
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-success/15 text-success border border-success/25">
-              {PROBLEM.difficulty}
-            </span>
-          </div>
-
-          <div className="prose-invert text-sm text-foreground/85 leading-relaxed mb-8 space-y-3">
-            {PROBLEM.description.split("\n\n").map((p, i) => (
-              <p key={i} dangerouslySetInnerHTML={{ __html: p.replace(/`([^`]+)`/g, '<code class="px-1.5 py-0.5 rounded bg-primary/10 text-primary text-xs font-mono">$1</code>').replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>') }} />
-            ))}
-          </div>
-
-          <div className="space-y-4 mb-8">
-            {PROBLEM.examples.map((ex, i) => (
-              <div key={i} className="bg-background border border-border rounded-xl p-4">
-                <div className="text-xs font-semibold text-muted uppercase tracking-wider mb-3">
-                  Example {i + 1}
-                </div>
-                <div className="space-y-1.5 font-mono text-sm">
-                  <div>
-                    <span className="text-muted">Input: </span>
-                    <span className="text-foreground">{ex.input}</span>
-                  </div>
-                  <div>
-                    <span className="text-muted">Output: </span>
-                    <span className="text-foreground">{ex.output}</span>
-                  </div>
-                  {ex.explanation && (
-                    <div>
-                      <span className="text-muted">Explanation: </span>
-                      <span className="text-foreground/70">{ex.explanation}</span>
-                    </div>
-                  )}
-                </div>
+          {problem ? (
+            <>
+              <div className="flex items-center gap-3 mb-6">
+                <h1 className="text-xl font-bold text-foreground">
+                  {problem.title}
+                </h1>
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-success/15 text-success border border-success/25">
+                  {problem.difficulty}
+                </span>
               </div>
-            ))}
-          </div>
 
-          <div>
-            <h3 className="text-sm font-semibold text-foreground mb-3">Constraints</h3>
-            <ul className="space-y-1.5">
-              {PROBLEM.constraints.map((c, i) => (
-                <li key={i} className="flex items-start gap-2 text-sm text-foreground/70">
-                  <span className="text-primary mt-0.5">•</span>
-                  <code className="font-mono text-xs bg-primary/5 px-1.5 py-0.5 rounded">{c}</code>
-                </li>
-              ))}
-            </ul>
-          </div>
+              <div className="prose-invert text-sm text-foreground/85 leading-relaxed mb-8 space-y-3">
+                {problem.description.split("\n\n").map((p: string, i: number) => (
+                  <p key={i} dangerouslySetInnerHTML={{ __html: p.replace(/`([^`]+)`/g, '<code class="px-1.5 py-0.5 rounded bg-primary/10 text-primary text-xs font-mono">$1</code>').replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>') }} />
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className="text-muted text-sm flex items-center justify-center h-full">
+              Loading problem...
+            </div>
+          )}
         </section>
 
         {/* ═══════ RIGHT: Code Editor + Console ═══════ */}

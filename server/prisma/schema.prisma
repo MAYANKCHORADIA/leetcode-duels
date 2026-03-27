@@ -7,13 +7,62 @@ datasource db {
 }
 
 model User {
-  id            String   @id @default(uuid())
-  username      String   @unique
+  id            String    @id @default(uuid())
+  name          String
+  email         String    @unique
+  emailVerified Boolean
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  username      String    @unique
   collegeName   String
-  eloRating     Int      @default(1200)
-  matchesPlayed Int      @default(0)
-  matchesWon    Int      @default(0)
-  createdAt     DateTime @default(now())
+  eloRating     Int       @default(1200)
+  matchesPlayed Int       @default(0)
+  matchesWon    Int       @default(0)
+  
+  sessions      Session[]
+  accounts      Account[]
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  expiresAt DateTime
+  token     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([token])
+}
+
+model Account {
+  id                    String    @id @default(uuid())
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+}
+
+model Verification {
+  id         String    @id @default(uuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime? @default(now())
+  updatedAt  DateTime? @updatedAt
 }
 
 model MatchHistory {
@@ -23,4 +72,25 @@ model MatchHistory {
   problemName String
   duration    Int      // time taken in seconds
   createdAt   DateTime @default(now())
+}
+
+model Problem {
+  id          String   @id @default(uuid())
+  title       String
+  description String
+  difficulty  String
+  topic       String
+  testCases   Json
+  createdAt   DateTime @default(now())
+}
+
+model Friendship {
+  id          String   @id @default(uuid())
+  requesterId String
+  addresseeId String
+  status      String   @default("PENDING")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([requesterId, addresseeId])
 }

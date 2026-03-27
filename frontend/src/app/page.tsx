@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useUserStore } from "@/store/userStore";
+import { authClient } from "@/lib/authClient";
 
 const BACKEND_URL =
   process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8080";
@@ -26,25 +27,53 @@ export default function OnboardingPage() {
 
     setLoading(true);
     try {
+      const cleanUsername = username.trim();
+      const cleanCollege = collegeName.trim();
+      const fakeEmail = `${cleanUsername}@dummy.local`;
+      const fakePassword = `secure_${cleanUsername}_123`;
+
+      // 1. Try signing in
+      let authRes: any = await authClient.signIn.email({
+        email: fakeEmail,
+        password: fakePassword,
+      });
+
+      // 2. If user doesn't exist, sign up
+      if (authRes.error) {
+        authRes = await authClient.signUp.email({
+          email: fakeEmail,
+          password: fakePassword,
+          name: cleanUsername,
+          username: cleanUsername,
+          collegeName: cleanCollege,
+        });
+
+        if (authRes.error) {
+          throw new Error(authRes.error.message || "Failed to enter arena.");
+        }
+      }
+
+      // 3. Fetch full extended user from backend
       const res = await fetch(`${BACKEND_URL}/api/users`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          username: username.trim(),
-          collegeName: collegeName.trim(),
+          username: cleanUsername,
+          collegeName: cleanCollege,
+          id: authRes.data.user.id
         }),
       });
 
       if (!res.ok) {
         const data = await res.json();
-        throw new Error(data.error || "Something went wrong");
+        throw new Error(data.error || "Something went wrong fetching profile");
       }
 
-      const user = await res.json();
-      setUser(user);
+      const dbUser = await res.json();
+      setUser(dbUser);
       router.push("/dashboard");
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Network error. Is the backend running?");
+    } catch (err: any) {
+      setError(err.message || "Network error. Is the backend running?");
     } finally {
       setLoading(false);
     }

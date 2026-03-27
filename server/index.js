@@ -13,6 +13,10 @@ dotenv.config();
 const app = express();
 const server = http.createServer(app);
 
+const { betterAuth } = require("better-auth");
+const { prismaAdapter } = require("better-auth/adapters/prisma");
+const { toNodeHandler } = require("better-auth/node");
+
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
@@ -20,9 +24,33 @@ const prisma = new PrismaClient({ adapter });
 const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
 const PORT = process.env.PORT || 8080;
 
+const auth = betterAuth({
+  database: prismaAdapter(prisma, {
+    provider: "postgresql",
+  }),
+  baseURL: "http://localhost:8080",
+  trustedOrigins: [FRONTEND_URL],
+  emailAndPassword: {
+    enabled: true,
+  },
+  user: {
+    additionalFields: {
+      username: { type: "string", required: true },
+      collegeName: { type: "string", required: true },
+      eloRating: { type: "number", required: false, defaultValue: 1200 },
+      matchesPlayed: { type: "number", required: false, defaultValue: 0 },
+      matchesWon: { type: "number", required: false, defaultValue: 0 },
+    }
+  }
+});
+
+
+
 // ─── Middleware ──────────────────────────────────────────────────────
 app.use(cors({ origin: FRONTEND_URL, credentials: true }));
 app.use(express.json());
+
+app.all("/api/auth/*path", toNodeHandler(auth));
 
 // ─── Socket.io Setup ────────────────────────────────────────────────
 const io = new Server(server, {
@@ -35,6 +63,84 @@ const io = new Server(server, {
 
 // ─── In-memory Room Store ───────────────────────────────────────────
 const rooms = new Map();
+const connectedUsers = new Map(); // userId -> socket.id
+
+// Helper for Match Over
+async function processMatchOver(roomId, winnerId, loserId) {
+  try {
+    const room = rooms.get(roomId);
+    if (!room || room.status === "completed") return;
+
+    room.status = "completed"; // Prevent duplicate processing
+
+    const winnerData = room.players.find((p) => p.id === winnerId);
+    const loserData = room.players.find((p) => p.id === loserId);
+
+    if (!winnerData || !loserData) return;
+
+    // Fetch current stats from DB
+    const winner = await prisma.user.findUnique({ where: { id: winnerData.id } });
+    const loser = await prisma.user.findUnique({ where: { id: loserData.id } });
+
+    if (!winner || !loser) return;
+
+    // Calculate Elo changes (K=32)
+    const K = 32;
+    const expectedWinner = 1 / (1 + Math.pow(10, (loser.eloRating - winner.eloRating) / 400));
+    const expectedLoser = 1 / (1 + Math.pow(10, (winner.eloRating - loser.eloRating) / 400));
+
+    const newWinnerElo = winner.eloRating + Math.round(K * (1 - expectedWinner));
+    const newLoserElo = Math.max(0, loser.eloRating + Math.round(K * (0 - expectedLoser)));
+
+    const winnerGain = newWinnerElo - winner.eloRating;
+    const loserLoss = newLoserElo - loser.eloRating;
+
+    const duration = room.startTime ? Math.floor((Date.now() - room.startTime) / 1000) : 0;
+
+    // Prisma Transaction: Atomically update both users and create match history
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: winner.id },
+        data: {
+          eloRating: newWinnerElo,
+          matchesPlayed: { increment: 1 },
+          matchesWon: { increment: 1 },
+        },
+      }),
+      prisma.user.update({
+        where: { id: loser.id },
+        data: {
+          eloRating: newLoserElo,
+          matchesPlayed: { increment: 1 },
+        },
+      }),
+      prisma.matchHistory.create({
+        data: {
+          winnerId: winner.id,
+          loserId: loser.id,
+          problemName: room.config?.topic || "Two Sum",
+          duration: duration,
+        },
+      }),
+    ]);
+
+    // Broadcast match over
+    io.to(roomId).emit("match_over", {
+      winnerId: winner.id,
+      winnerUsername: winner.username,
+      newWinnerElo,
+      newLoserElo,
+      winnerGain,
+      loserLoss,
+      duration,
+    });
+
+    console.log(`🏆 Match Over in ${roomId} - Winner: ${winner.username}`);
+    rooms.delete(roomId);
+  } catch (err) {
+    console.error("Error processing match over:", err);
+  }
+}
 
 function generateRoomId() {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -63,7 +169,7 @@ io.on("connection", (socket) => {
   });
 
   // ── Join Room ──
-  socket.on("join_room", ({ roomId, user }) => {
+  socket.on("join_room", async ({ roomId, user }) => {
     const room = rooms.get(roomId);
 
     if (!room) {
@@ -80,17 +186,52 @@ io.on("connection", (socket) => {
     socket.join(roomId);
     console.log(`🤝 ${user.username} joined room ${roomId}`);
 
-    // Both players present → start match
-    room.startTime = Date.now();
-    io.to(roomId).emit("match_start", {
-      roomId,
-      players: room.players.map((p) => ({
-        id: p.id,
-        username: p.username,
-      })),
-      config: room.config,
-    });
-    console.log(`🚀 Match started in room ${roomId}`);
+    try {
+      const difficulty = room.config?.difficulty || "Easy";
+      const topic = room.config?.topic || "Arrays";
+      
+      const matchingProblems = await prisma.problem.findMany({
+        where: { difficulty, topic }
+      });
+
+      let selectedProblem;
+      if (matchingProblems.length > 0) {
+        const randomIndex = Math.floor(Math.random() * matchingProblems.length);
+        selectedProblem = matchingProblems[randomIndex];
+      } else {
+        selectedProblem = await prisma.problem.findFirst();
+      }
+
+      const problemData = selectedProblem ? {
+        id: selectedProblem.id,
+        title: selectedProblem.title,
+        description: selectedProblem.description,
+        difficulty: selectedProblem.difficulty,
+        topic: selectedProblem.topic
+      } : {
+        id: "placeholder",
+        title: "No Match Found",
+        description: "We couldn't find a problem matching those parameters in the DB.",
+        difficulty: difficulty,
+        topic: topic
+      };
+
+      // Both players present → start match
+      room.startTime = Date.now();
+      io.to(roomId).emit("match_start", {
+        roomId,
+        players: room.players.map((p) => ({
+          id: p.id,
+          username: p.username,
+        })),
+        config: room.config,
+        problem: problemData,
+      });
+      console.log(`🚀 Match started in room ${roomId} with problem ${problemData.id}`);
+    } catch (err) {
+      console.error("Match start error:", err);
+      socket.emit("room_error", { message: "Internal server error starting the match." });
+    }
   });
 
   // ── Code Update (typing indicator) ──
@@ -105,83 +246,39 @@ io.on("connection", (socket) => {
 
   // ── Match Won ──
   socket.on("match_won", async ({ roomId, userId }) => {
-    try {
-      const room = rooms.get(roomId);
-      if (!room || room.status === "completed") return;
+    const room = rooms.get(roomId);
+    if (!room) return;
+    const loser = room.players.find(p => p.id !== userId);
+    if (!loser) return;
+    await processMatchOver(roomId, userId, loser.id);
+  });
 
-      room.status = "completed"; // Prevent duplicate processing
+  // ── Forfeit Match ──
+  socket.on("forfeit_match", async ({ roomId, userId }) => {
+    const room = rooms.get(roomId);
+    if (!room) return;
+    const winner = room.players.find(p => p.id !== userId);
+    if (!winner) return;
+    await processMatchOver(roomId, winner.id, userId);
+  });
 
-      const winnerData = room.players.find((p) => p.id === userId);
-      const loserData = room.players.find((p) => p.id !== userId);
-
-      if (!winnerData || !loserData) return;
-
-      // Fetch current stats from DB
-      const winner = await prisma.user.findUnique({ where: { id: winnerData.id } });
-      const loser = await prisma.user.findUnique({ where: { id: loserData.id } });
-
-      if (!winner || !loser) return;
-
-      // Calculate Elo changes (K=32)
-      const K = 32;
-      const expectedWinner = 1 / (1 + Math.pow(10, (loser.eloRating - winner.eloRating) / 400));
-      const expectedLoser = 1 / (1 + Math.pow(10, (winner.eloRating - loser.eloRating) / 400));
-
-      const newWinnerElo = winner.eloRating + Math.round(K * (1 - expectedWinner));
-      const newLoserElo = loser.eloRating + Math.round(K * (0 - expectedLoser));
-
-      const winnerGain = newWinnerElo - winner.eloRating;
-      const loserLoss = newLoserElo - loser.eloRating;
-
-      const duration = room.startTime ? Math.floor((Date.now() - room.startTime) / 1000) : 0;
-
-      // Prisma Transaction: Atomically update both users and create match history
-      await prisma.$transaction([
-        prisma.user.update({
-          where: { id: winner.id },
-          data: {
-            eloRating: newWinnerElo,
-            matchesPlayed: { increment: 1 },
-            matchesWon: { increment: 1 },
-          },
-        }),
-        prisma.user.update({
-          where: { id: loser.id },
-          data: {
-            eloRating: newLoserElo,
-            matchesPlayed: { increment: 1 },
-          },
-        }),
-        prisma.matchHistory.create({
-          data: {
-            winnerId: winner.id,
-            loserId: loser.id,
-            problemName: room.config?.topic || "Two Sum",
-            duration: duration,
-          },
-        }),
-      ]);
-
-      // Broadcast match over
-      io.to(roomId).emit("match_over", {
-        winnerId: winner.id,
-        winnerUsername: winner.username,
-        newWinnerElo,
-        newLoserElo,
-        winnerGain,
-        loserLoss,
-        duration,
-      });
-
-      console.log(`🏆 Match Over in ${roomId} - Winner: ${winner.username}`);
-      rooms.delete(roomId);
-    } catch (err) {
-      console.error("Error processing match_won:", err);
+  // ── User Identity & Challenges ──
+  socket.on("identify", (userId) => {
+    if (userId) connectedUsers.set(userId, socket.id);
+  });
+  
+  socket.on("send_challenge", ({ friendId, roomId, challenger }) => {
+    const friendSocketId = connectedUsers.get(friendId);
+    if (friendSocketId) {
+      io.to(friendSocketId).emit("challenge_received", { roomId, challenger });
     }
   });
 
   // ── Disconnect ──
   socket.on("disconnect", () => {
+    for (const [key, value] of connectedUsers.entries()) {
+      if (value === socket.id) connectedUsers.delete(key);
+    }
     console.log(`🔌 Client disconnected: ${socket.id}`);
   });
 });
@@ -198,16 +295,7 @@ const LANGUAGE_MAP = {
   java: 62,      // Java (OpenJDK 13.0.1)
 };
 
-// Hidden test cases per problem (keyed by problem_id)
-const HIDDEN_TEST_CASES = {
-  two_sum: [
-    { input: "4\n2 7 11 15\n9", expected_output: "0 1" },
-    { input: "3\n3 2 4\n6", expected_output: "1 2" },
-    { input: "2\n3 3\n6", expected_output: "0 1" },
-    { input: "5\n1 5 3 7 2\n9", expected_output: "1 4" },
-    { input: "4\n-1 -2 -3 -4\n-6", expected_output: "1 3" },
-  ],
-};
+// Hidden test cases moved to database
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -219,23 +307,34 @@ app.get("/", (_req, res) => {
 // ── Create or fetch user ──
 app.post("/api/users", async (req, res) => {
   try {
-    const { username, collegeName } = req.body;
+    const { username, collegeName, id } = req.body;
 
     if (!username || !collegeName) {
-      return res.status(400).json({ error: "username and collegeName are required" });
+      return res.status(400).json({ error: "Username and college are required" });
     }
 
-    const user = await prisma.user.upsert({
-      where: { username },
-      update: {},
-      create: { username, collegeName },
-      select: { id: true, username: true, collegeName: true, eloRating: true, matchesPlayed: true, matchesWon: true },
-    });
+    let user = await prisma.user.findUnique({ where: { username } });
 
-    return res.json(user);
+    if (!user) {
+      user = await prisma.user.create({
+        data: {
+          id: id,                    // Sync ID with Better Auth
+          name: username,            // Sync Name with Better Auth
+          email: `${username}@dummy.local`,
+          emailVerified: true,
+          username,
+          collegeName,
+          eloRating: 1200,
+          matchesPlayed: 0,
+          matchesWon: 0,
+        },
+      });
+    }
+
+    res.json(user);
   } catch (err) {
-    console.error("Error in POST /api/users:", err);
-    return res.status(500).json({ error: "Internal server error" });
+    console.error("Error in /api/users:", err);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -249,7 +348,17 @@ app.post("/api/execute", async (req, res) => {
     }
 
     const langId = LANGUAGE_MAP[language_id] || LANGUAGE_MAP.python;
-    const testCases = HIDDEN_TEST_CASES[problem_id || "two_sum"] || HIDDEN_TEST_CASES.two_sum;
+    
+    // Fetch problem from database to retrieve its test cases
+    const problem = await prisma.problem.findUnique({
+      where: { id: problem_id }
+    });
+
+    if (!problem || !problem.testCases) {
+      return res.status(404).json({ error: "Problem not found or has no test cases." });
+    }
+
+    const testCases = problem.testCases;
 
     const submissions = testCases.map(tc => ({
       language_id: langId,
@@ -379,6 +488,127 @@ app.get("/api/leaderboard/global", async (req, res) => {
   } catch (err) {
     console.error("Error fetching global leaderboard:", err);
     return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ── Profile & Match History ──
+app.get("/api/users/profile/:username", async (req, res) => {
+  try {
+    const { username } = req.params;
+    const user = await prisma.user.findUnique({ where: { username } });
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    const matchHistory = await prisma.matchHistory.findMany({
+      where: {
+        OR: [{ winnerId: user.id }, { loserId: user.id }]
+      },
+      orderBy: { createdAt: "desc" },
+      take: 20
+    });
+
+    const opponentIds = matchHistory.map(m => m.winnerId === user.id ? m.loserId : m.winnerId);
+    const opponents = await prisma.user.findMany({ where: { id: { in: opponentIds } } });
+
+    const populatedHistory = matchHistory.map(m => {
+      const isWinner = m.winnerId === user.id;
+      const opponentId = isWinner ? m.loserId : m.winnerId;
+      const opponent = opponents.find(u => u.id === opponentId);
+      return {
+        ...m,
+        opponentName: opponent ? opponent.username : "Unknown",
+        isWinner
+      };
+    });
+
+    res.json({ ...user, matchHistory: populatedHistory });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ── Social & Friends ──
+app.get("/api/users/search", async (req, res) => {
+  try {
+    const { q } = req.query;
+    if (!q) return res.json([]);
+    const users = await prisma.user.findMany({
+      where: { username: { contains: q, mode: "insensitive" } },
+      take: 10
+    });
+    res.json(users);
+  } catch (err) {
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+app.post("/api/friends/request", async (req, res) => {
+  try {
+    const { requesterId, addresseeId } = req.body;
+    if (requesterId === addresseeId) return res.status(400).json({ error: "Cannot add yourself" });
+    
+    // Check existing
+    const existing = await prisma.friendship.findFirst({
+      where: {
+        OR: [
+          { requesterId, addresseeId },
+          { requesterId: addresseeId, addresseeId: requesterId }
+        ]
+      }
+    });
+    
+    if (existing) return res.status(400).json({ error: "Friendship already exists" });
+
+    const friend = await prisma.friendship.create({
+      data: { requesterId, addresseeId }
+    });
+    res.json(friend);
+  } catch (err) {
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+app.post("/api/friends/accept", async (req, res) => {
+  try {
+    const { requesterId, addresseeId } = req.body;
+    const friend = await prisma.friendship.update({
+      where: { requesterId_addresseeId: { requesterId, addresseeId } },
+      data: { status: "ACCEPTED" }
+    });
+    res.json(friend);
+  } catch (err) {
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+app.get("/api/friends/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const friendships = await prisma.friendship.findMany({
+      where: { OR: [{ requesterId: userId }, { addresseeId: userId }] }
+    });
+
+    const relatedUserIds = friendships.map(f => f.requesterId === userId ? f.addresseeId : f.requesterId);
+    const users = await prisma.user.findMany({
+      where: { id: { in: relatedUserIds } },
+      select: { id: true, username: true, eloRating: true, collegeName: true }
+    });
+
+    const friendsList = friendships.map(f => {
+      const isRequester = f.requesterId === userId;
+      const relatedId = isRequester ? f.addresseeId : f.requesterId;
+      const user = users.find(u => u.id === relatedId);
+
+      return {
+        ...f,
+        user,
+        type: isRequester ? "OUTGOING" : "INCOMING"
+      };
+    });
+
+    res.json(friendsList);
+  } catch (err) {
+    res.status(500).json({ error: "Server error" });
   }
 });
 
