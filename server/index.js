@@ -4,13 +4,18 @@ const { Server } = require("socket.io");
 const cors = require("cors");
 const dotenv = require("dotenv");
 const { PrismaClient } = require("@prisma/client");
+const { Pool } = require("pg");
+const { PrismaPg } = require("@prisma/adapter-pg");
 
 // Load environment variables
 dotenv.config();
 
 const app = express();
 const server = http.createServer(app);
-const prisma = new PrismaClient();
+
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const adapter = new PrismaPg(pool);
+const prisma = new PrismaClient({ adapter });
 
 const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
 const PORT = process.env.PORT || 8080;
@@ -181,9 +186,10 @@ io.on("connection", (socket) => {
   });
 });
 
-// ─── Judge0 Config ──────────────────────────────────────────────────
-const JUDGE0_API_URL = process.env.JUDGE0_API_URL || "https://judge0-ce.p.rapidapi.com";
-const JUDGE0_API_KEY = process.env.JUDGE0_API_KEY || "";
+// ─── Judge0 Batch Config ──────────────────────────────────────────────
+const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY || "";
+const JUDGE0_HOST = "judge0-ce.p.rapidapi.com";
+const JUDGE0_URL = "https://" + JUDGE0_HOST;
 
 const LANGUAGE_MAP = {
   cpp: 54,       // C++ (GCC 9.2.0)
@@ -203,53 +209,7 @@ const HIDDEN_TEST_CASES = {
   ],
 };
 
-// Helper: sleep
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-// Helper: submit a single test case to Judge0 and poll for result
-async function submitToJudge0(sourceCode, languageId, stdin, expectedOutput) {
-  const headers = {
-    "Content-Type": "application/json",
-    "X-RapidAPI-Key": JUDGE0_API_KEY,
-    "X-RapidAPI-Host": new URL(JUDGE0_API_URL).hostname,
-  };
-
-  // Create submission
-  const createRes = await fetch(`${JUDGE0_API_URL}/submissions?base64_encoded=false&wait=false`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      source_code: sourceCode,
-      language_id: languageId,
-      stdin,
-      expected_output: expectedOutput,
-    }),
-  });
-
-  if (!createRes.ok) {
-    const text = await createRes.text();
-    throw new Error(`Judge0 submission failed: ${createRes.status} ${text}`);
-  }
-
-  const { token } = await createRes.json();
-
-  // Poll for result (max ~10 seconds)
-  for (let i = 0; i < 20; i++) {
-    await sleep(500);
-    const pollRes = await fetch(
-      `${JUDGE0_API_URL}/submissions/${token}?base64_encoded=false&fields=status,stdout,stderr,compile_output,message,time,memory`,
-      { headers }
-    );
-    const result = await pollRes.json();
-
-    // Status 1 = In Queue, 2 = Processing
-    if (result.status && result.status.id > 2) {
-      return result;
-    }
-  }
-
-  return { status: { id: 5, description: "Execution Timeout" }, stdout: null, stderr: "Judge0 timed out after 10 seconds" };
-}
 
 // ─── REST Routes ────────────────────────────────────────────────────
 app.get("/", (_req, res) => {
@@ -288,69 +248,117 @@ app.post("/api/execute", async (req, res) => {
       return res.status(400).json({ error: "source_code and language_id are required" });
     }
 
-    const langId = LANGUAGE_MAP[language_id] || language_id;
+    const langId = LANGUAGE_MAP[language_id] || LANGUAGE_MAP.python;
     const testCases = HIDDEN_TEST_CASES[problem_id || "two_sum"] || HIDDEN_TEST_CASES.two_sum;
 
-    const results = [];
-    let passed = 0;
+    const submissions = testCases.map(tc => ({
+      language_id: langId,
+      source_code,
+      stdin: tc.input,
+      expected_output: tc.expected_output
+    }));
 
+    const headers = {
+      "Content-Type": "application/json",
+      "X-RapidAPI-Key": RAPIDAPI_KEY,
+      "X-RapidAPI-Host": JUDGE0_HOST,
+    };
+
+    // 1. Submit the batch
+    const batchCreateRes = await fetch(`${JUDGE0_URL}/submissions/batch?base64_encoded=false`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ submissions }),
+    });
+
+    if (!batchCreateRes.ok) {
+      const text = await batchCreateRes.text();
+      throw new Error(`Judge0 batch submission failed: ${batchCreateRes.status} ${text}`);
+    }
+
+    const tokensArray = await batchCreateRes.json();
+    const tokens = tokensArray.map(t => t.token).join(",");
+
+    // 2. Poll for results (Max 5 attempts, 1.5s interval)
+    let finalResults = [];
+    let isFinished = false;
+
+    for (let attempts = 0; attempts < 5; attempts++) {
+      await sleep(1500);
+      const pollRes = await fetch(`${JUDGE0_URL}/submissions/batch?tokens=${tokens}&base64_encoded=false&fields=status,stdout,stderr,compile_output,expected_output,time,memory`, {
+        headers
+      });
+
+      if (!pollRes.ok) continue;
+
+      const data = await pollRes.json();
+      const polledSubmissions = data.submissions;
+      
+      const allDone = polledSubmissions.every(s => s.status && s.status.id >= 3);
+      if (allDone) {
+        finalResults = polledSubmissions;
+        isFinished = true;
+        break;
+      }
+    }
+
+    // fallback if timed out
+    if (!isFinished) {
+      const pollRes = await fetch(`${JUDGE0_URL}/submissions/batch?tokens=${tokens}&base64_encoded=false&fields=status,stdout,stderr,compile_output,expected_output,time,memory`, {
+        headers
+      }).catch(() => null);
+      if (pollRes && pollRes.ok) {
+        const data = await pollRes.json();
+        finalResults = data.submissions;
+      }
+    }
+
+    let passedCount = 0;
+    const results = [];
+
+    // 3. Evaluate and Respond
     for (let i = 0; i < testCases.length; i++) {
       const tc = testCases[i];
-      try {
-        const result = await submitToJudge0(source_code, langId, tc.input, tc.expected_output);
+      const resultObj = finalResults[i] || { status: { id: 5, description: "Execution Timeout" } };
+      
+      const isPassed = resultObj.status?.id === 3;
+      if (isPassed) passedCount++;
 
-        const statusId = result.status?.id;
-        const isPassed = statusId === 3; // 3 = Accepted
-        if (isPassed) passed++;
+      results.push({
+        testCase: i + 1,
+        status: resultObj.status?.description || "Unknown",
+        passed: isPassed,
+        stdout: resultObj.stdout?.trim() || null,
+        stderr: resultObj.stderr?.trim() || null,
+        compile_output: resultObj.compile_output?.trim() || null,
+        expected: tc.expected_output,
+        time: resultObj.time || null,
+        memory: resultObj.memory || null,
+      });
 
-        results.push({
-          testCase: i + 1,
-          status: result.status?.description || "Unknown",
-          passed: isPassed,
-          stdout: result.stdout?.trim() || null,
-          stderr: result.stderr?.trim() || null,
-          compile_output: result.compile_output?.trim() || null,
-          expected: tc.expected_output,
-          time: result.time,
-          memory: result.memory,
-        });
-
-        // If compile error, skip remaining tests
-        if (statusId === 6) {
-          for (let j = i + 1; j < testCases.length; j++) {
-            results.push({
-              testCase: j + 1,
-              status: "Skipped",
-              passed: false,
-              stdout: null,
-              stderr: null,
-              compile_output: result.compile_output?.trim() || null,
-              expected: testCases[j].expected_output,
-              time: null,
-              memory: null,
-            });
-          }
-          break;
+      if (!isPassed) {
+        // Break on first failure and mock remaining tests
+        for (let j = i + 1; j < testCases.length; j++) {
+          results.push({
+            testCase: j + 1,
+            status: "Skipped",
+            passed: false,
+            stdout: null,
+            stderr: null,
+            compile_output: null,
+            expected: testCases[j].expected_output,
+            time: null,
+            memory: null,
+          });
         }
-      } catch (err) {
-        results.push({
-          testCase: i + 1,
-          status: "Error",
-          passed: false,
-          stdout: null,
-          stderr: err.message,
-          compile_output: null,
-          expected: tc.expected_output,
-          time: null,
-          memory: null,
-        });
+        break;
       }
     }
 
     return res.json({
-      passed,
+      passed: passedCount,
       total: testCases.length,
-      allPassed: passed === testCases.length,
+      allPassed: passedCount === testCases.length,
       results,
     });
   } catch (err) {

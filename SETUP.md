@@ -85,3 +85,10 @@ npm run dev
 | Frontend | Vercel   | Connect GitHub repo, set root to `frontend/`, add `NEXT_PUBLIC_BACKEND_URL` env var |
 | Backend  | Render   | Connect GitHub repo, set root to `server/`, add all `server/.env` vars |
 | Database | Neon     | Already configured via `DATABASE_URL` |
+
+
+forfeit option
+friends option
+add questions
+profile option
+logout option

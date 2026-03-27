@@ -34,6 +34,7 @@ export default function DashboardPage() {
   const [joinRoomId, setJoinRoomId] = useState("");
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
+  const [isJoining, setIsJoining] = useState(false);
 
   // ── Create Room Form ──
   const [difficulty, setDifficulty] = useState<string>(DIFFICULTIES[0]);
@@ -55,14 +56,13 @@ export default function DashboardPage() {
       setView("waiting");
     };
 
-    const onMatchStart = () => {
-      // Future: navigate to the duel page
-      // For now, just log it
-      console.log("Match started!");
+    const onMatchStart = ({ roomId }: { roomId: string }) => {
+      router.push(`/room/${roomId}`);
     };
 
     const onRoomError = ({ message }: { message: string }) => {
       setError(message);
+      setIsJoining(false);
     };
 
     socket.on("room_created", onRoomCreated);
@@ -90,14 +90,17 @@ export default function DashboardPage() {
   }, [user, difficulty, topic, timeLimit]);
 
   const handleJoinRoom = useCallback(() => {
-    if (!user || !joinRoomId.trim()) return;
+    if (!user || !joinRoomId.trim() || isJoining) return;
     setError("");
+    setIsJoining(true);
     const socket = getSocket();
     socket.emit("join_room", {
       roomId: joinRoomId.trim().toUpperCase(),
       user: { id: user.id, username: user.username },
     });
-  }, [user, joinRoomId]);
+    // Auto-reset joining state after a delay in case of network miss
+    setTimeout(() => setIsJoining(false), 3000);
+  }, [user, joinRoomId, isJoining]);
 
   const copyRoomId = useCallback(() => {
     navigator.clipboard.writeText(roomId);
@@ -275,7 +278,7 @@ export default function DashboardPage() {
 
             <button
               onClick={handleJoinRoom}
-              disabled={joinRoomId.length < 6}
+              disabled={joinRoomId.length < 6 || isJoining}
               className="w-full py-3 rounded-xl font-semibold text-white cursor-pointer
                          bg-gradient-to-r from-primary to-accent
                          hover:from-primary-hover hover:to-accent
@@ -283,7 +286,7 @@ export default function DashboardPage() {
                          transition-all duration-300
                          shadow-lg shadow-primary/20 hover:shadow-primary/40"
             >
-              Join Duel →
+              {isJoining ? "Joining..." : "Join Duel →"}
             </button>
 
             <button
