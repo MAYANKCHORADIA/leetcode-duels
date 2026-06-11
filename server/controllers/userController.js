@@ -9,23 +9,26 @@ export const createOrFetchUser = async (req, res) => {
       return res.status(400).json({ error: "Username and college are required" });
     }
 
-    let user = await prisma.user.findUnique({ where: { username } });
-
-    if (!user) {
-      user = await prisma.user.create({
-        data: {
-          id: id,                    // Sync ID with Better Auth
-          name: username,            // Sync Name with Better Auth
-          email: `${username}@dummy.local`,
-          emailVerified: true,
-          username,
-          collegeName,
-          eloRating: 1200,
-          matchesPlayed: 0,
-          matchesWon: 0,
-        },
-      });
-    }
+    // Use upsert to handle both cases:
+    // - Better Auth already created the user (signUp) → update custom fields
+    // - User exists from a previous login → just fetch
+    const user = await prisma.user.upsert({
+      where: { username },
+      update: {
+        collegeName,
+      },
+      create: {
+        id: id,
+        name: username,
+        email: `${username}@dummy.local`,
+        emailVerified: true,
+        username,
+        collegeName,
+        eloRating: 1200,
+        matchesPlayed: 0,
+        matchesWon: 0,
+      },
+    });
 
     res.json(user);
   } catch (err) {
