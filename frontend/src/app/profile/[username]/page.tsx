@@ -2,9 +2,17 @@
 
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
+import Navbar from "@/components/Navbar";
+import LoadingSpinner from "@/components/LoadingSpinner";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
+import { ArrowLeft } from "lucide-react";
 
-// Added dynamic backend URL
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8080";
+const BACKEND_URL =
+  process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8080";
 
 interface Match {
   id: string;
@@ -22,7 +30,7 @@ interface UserProfile {
   eloRating: number;
   matchesPlayed: number;
   matchesWon: number;
-  loginCount?: number; // <--- Added this to fix the TypeScript error
+  loginCount?: number;
   matchHistory: Match[];
 }
 
@@ -33,7 +41,6 @@ export default function ProfilePage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Replaced localhost with the dynamic BACKEND_URL
     fetch(`${BACKEND_URL}/api/users/profile/${username}`)
       .then((res) => {
         if (!res.ok) throw new Error("Not found");
@@ -50,109 +57,157 @@ export default function ProfilePage() {
   }, [username]);
 
   if (loading) {
-    return (
-      <div className="flex-1 flex items-center justify-center h-screen bg-grid">
-        <div className="animate-spin text-primary rounded-full h-8 w-8 border-b-2 border-primary"></div>
-      </div>
-    );
+    return <LoadingSpinner message="Loading profile..." />;
   }
 
   if (!profile) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center h-screen bg-grid">
-        <h1 className="text-2xl font-bold mb-4">User Not Found</h1>
-        <button onClick={() => router.push("/dashboard")} className="px-4 py-2 bg-primary rounded-xl text-white font-semibold shadow-lg hover:bg-primary/90 transition-colors">
+      <div className="flex-1 flex flex-col items-center justify-center h-screen gap-4">
+        <h1 className="text-2xl font-semibold text-foreground">
+          User Not Found
+        </h1>
+        <Button
+          onClick={() => router.push("/dashboard")}
+          className="cursor-pointer"
+        >
           Back to Dashboard
-        </button>
+        </Button>
       </div>
     );
   }
 
-  return (
-    <div className="h-screen flex flex-col bg-grid">
-      {/* Navigation Bar */}
-      <header className="w-full bg-surface border-b border-border p-4 px-6 flex justify-between items-center z-50">
-        <div className="font-bold text-xl text-transparent bg-clip-text bg-gradient-to-r from-primary to-accent">LeetCode Duels</div>
-        <div className="flex items-center gap-6">
-          <button onClick={() => router.push("/dashboard")} className="text-sm font-semibold hover:text-primary transition-colors text-foreground/80">
-            Dashboard
-          </button>
-        </div>
-      </header>
+  const winRate =
+    profile.matchesPlayed > 0
+      ? Math.round((profile.matchesWon / profile.matchesPlayed) * 100)
+      : 0;
 
-      <main className="flex-1 flex flex-col items-center px-4 py-10 overflow-y-auto">
-        <div className="w-full max-w-3xl animate-slide-up">
+  return (
+    <div className="h-screen flex flex-col">
+      <Navbar />
+
+      <main className="flex-1 overflow-y-auto px-4 py-10">
+        <div className="w-full max-w-5xl mx-auto animate-slide-up flex flex-col gap-8">
           {/* Profile Card */}
-          <div className="bg-surface border border-border rounded-2xl p-8 mb-8 glow-purple flex flex-col md:flex-row items-center gap-6 text-center md:text-left">
-            <div className="w-24 h-24 rounded-full bg-gradient-to-tr from-primary to-accent flex items-center justify-center text-4xl font-bold text-white shadow-lg shadow-primary/20">
-              {profile.username.charAt(0).toUpperCase()}
-            </div>
-            <div className="flex-1">
-              <h1 className="text-3xl font-bold text-foreground">
-                {profile.username}
-              </h1>
-              <p className="text-muted text-sm mt-1 mb-4 flex items-center justify-center md:justify-start gap-2">
-                <span className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]"></span>
-                {profile.collegeName}
-              </p>
-              <div className="flex flex-wrap items-center justify-center md:justify-start gap-6">
-                <div>
-                  <div className="text-sm text-muted uppercase tracking-wider mb-1">Elo Rating</div>
-                  <div className="text-2xl font-bold font-mono text-primary">{profile.eloRating}</div>
-                </div>
-                <div>
-                  <div className="text-sm text-muted uppercase tracking-wider mb-1">Matches</div>
-                  <div className="text-2xl font-bold font-mono text-foreground">{profile.matchesPlayed}</div>
-                </div>
-                <div>
-                  <div className="text-sm text-muted uppercase tracking-wider mb-1">Win Rate</div>
-                  <div className="text-2xl font-bold font-mono text-foreground">
-                    {profile.matchesPlayed > 0 ? Math.round((profile.matchesWon / profile.matchesPlayed) * 100) : 0}%
+          <Card className="glow-primary">
+            <CardContent className="flex flex-col md:flex-row items-center gap-6 text-center md:text-left p-8">
+              <Avatar className="w-20 h-20">
+                <AvatarFallback className="bg-primary text-primary-foreground text-2xl font-semibold">
+                  {profile.username.charAt(0).toUpperCase()}
+                </AvatarFallback>
+              </Avatar>
+
+              <div className="flex-1">
+                <h1 className="text-2xl font-semibold text-foreground font-mono">
+                  {profile.username}
+                </h1>
+                <p className="text-sm font-medium text-muted-foreground mt-1 flex items-center justify-center md:justify-start gap-2">
+                  <span className="w-2 h-2 rounded-full bg-success" />
+                  {profile.collegeName}
+                </p>
+
+                <div className="flex flex-wrap items-center justify-center md:justify-start gap-6 mt-4">
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">
+                      Elo Rating
+                    </p>
+                    <p className="text-xl font-semibold font-mono text-primary">
+                      {profile.eloRating}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">
+                      Matches
+                    </p>
+                    <p className="text-xl font-semibold font-mono text-foreground">
+                      {profile.matchesPlayed}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">
+                      Win Rate
+                    </p>
+                    <p className="text-xl font-semibold font-mono text-foreground">
+                      {winRate}%
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">
+                      Logins
+                    </p>
+                    <p className="text-xl font-semibold font-mono text-accent">
+                      {profile.loginCount || 0}
+                    </p>
                   </div>
                 </div>
-                <div>
-                  <div className="text-sm text-muted uppercase tracking-wider mb-1">Logins</div>
-                  <div className="text-2xl font-bold font-mono text-accent">{profile.loginCount || 0}</div>
-                </div>
               </div>
-            </div>
-          </div>
+            </CardContent>
+          </Card>
 
           {/* Match History */}
-          <h2 className="text-xl font-bold text-foreground mb-4 pl-2">Match History</h2>
-          <div className="bg-surface border border-border rounded-2xl overflow-hidden glow-blue">
-            {profile.matchHistory.length === 0 ? (
-              <div className="p-8 text-center text-muted">No matches played yet.</div>
-            ) : (
-              <div className="divide-y divide-border">
-                {profile.matchHistory.map((match) => (
-                  <div key={match.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-foreground/[0.02] transition-colors">
-                    <div className="flex items-center gap-4">
-                      <div className={`w-2 h-12 rounded-full ${match.isWinner ? 'bg-success shadow-[0_0_10px_rgba(34,197,94,0.3)]' : 'bg-destructive/50'}`} />
-                      <div>
-                        <div className="font-semibold text-foreground flex items-center gap-2">
-                          {match.isWinner ? (
-                            <span className="text-success flex items-center gap-1">🏆 Victory</span>
-                          ) : (
-                            <span className="text-muted flex items-center gap-1">💀 Defeat</span>
-                          )}
-                          <span className="text-muted text-xs font-normal">vs</span>
-                          <span className="text-accent cursor-pointer hover:underline" onClick={() => router.push(`/profile/${match.opponentName}`)}>
-                            {match.opponentName}
-                          </span>
-                        </div>
-                        <div className="text-sm text-muted mt-1">
-                          {match.problemName} • {match.duration}s
+          <div className="flex flex-col gap-4">
+            <h2 className="text-xl font-semibold text-foreground pl-1">
+              Match History
+            </h2>
+
+            <Card>
+              {profile.matchHistory.length === 0 ? (
+                <CardContent className="py-12 text-center text-muted-foreground">
+                  No matches played yet.
+                </CardContent>
+              ) : (
+                <div className="divide-y divide-border">
+                  {profile.matchHistory.map((match) => (
+                    <div
+                      key={match.id}
+                      className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 hover:bg-muted/20 transition-colors"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div
+                          className={`w-1 h-12 rounded-full ${
+                            match.isWinner
+                              ? "bg-success"
+                              : "bg-destructive/50"
+                          }`}
+                        />
+                        <div>
+                          <div className="flex items-center gap-2 text-sm font-semibold">
+                            {match.isWinner ? (
+                              <Badge
+                                variant="secondary"
+                                className="text-success"
+                              >
+                                🏆 Victory
+                              </Badge>
+                            ) : (
+                              <Badge variant="secondary">💀 Defeat</Badge>
+                            )}
+                            <span className="text-muted-foreground font-normal">
+                              vs
+                            </span>
+                            <button
+                              className="font-mono text-accent hover:underline cursor-pointer"
+                              onClick={() =>
+                                router.push(
+                                  `/profile/${match.opponentName}`
+                                )
+                              }
+                            >
+                              {match.opponentName}
+                            </button>
+                          </div>
+                          <p className="text-sm text-muted-foreground mt-1">
+                            {match.problemName} • {match.duration}s
+                          </p>
                         </div>
                       </div>
+                      <Badge variant="outline" className="font-mono text-sm shrink-0">
+                        {new Date(match.createdAt).toLocaleDateString()}
+                      </Badge>
                     </div>
-                    <div className="text-xs text-muted font-mono bg-background px-3 py-1.5 rounded-lg border border-border text-right">
-                      {new Date(match.createdAt).toLocaleDateString()}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+                  ))}
+                </div>
+              )}
+            </Card>
           </div>
         </div>
       </main>

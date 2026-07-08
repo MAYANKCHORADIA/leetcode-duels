@@ -1,88 +1,158 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Design System — Coding Duels
+ * Dark-only theme, Indigo primary, Slate neutral base.
+ * All shadcn/ui components will pick up these tokens.
+ */
 
 @theme inline {
-  --color-background: #0a0a0f;
-  --color-foreground: #e8e8ed;
-  --color-surface: #12121a;
-  --color-surface-hover: #1a1a25;
-  --color-border: #1e1e2e;
-  --color-border-hover: #2a2a3e;
-  --color-primary: #6c5ce7;
-  --color-primary-hover: #7c6cf7;
-  --color-accent: #a29bfe;
-  --color-success: #00cec9;
-  --color-danger: #ff6b6b;
-  --color-muted: #636383;
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* ── Font stacks ── */
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --font-heading: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+
+  /* ── Color mapping for Tailwind ── */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* ── Semantic colors (used in custom classes) ── */
+  --color-success: oklch(0.72 0.19 163);
+  --color-warning: oklch(0.80 0.18 84);
+
+  /* ── Radius scale ── */
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-* {
-  box-sizing: border-box;
+/*
+ * Dark-only: We set the CSS variables on :root directly.
+ * Using Slate-900/950 base + Indigo-500/600 primary.
+ */
+:root {
+  --background: oklch(0.13 0.01 260);
+  --foreground: oklch(0.95 0.005 260);
+
+  --card: oklch(0.17 0.012 260);
+  --card-foreground: oklch(0.95 0.005 260);
+
+  --popover: oklch(0.17 0.012 260);
+  --popover-foreground: oklch(0.95 0.005 260);
+
+  --primary: oklch(0.585 0.22 264);
+  --primary-foreground: oklch(1 0 0);
+
+  --secondary: oklch(0.23 0.015 260);
+  --secondary-foreground: oklch(0.90 0.005 260);
+
+  --muted: oklch(0.23 0.015 260);
+  --muted-foreground: oklch(0.60 0.02 260);
+
+  --accent: oklch(0.72 0.15 264);
+  --accent-foreground: oklch(1 0 0);
+
+  --destructive: oklch(0.65 0.22 25);
+
+  --border: oklch(0.27 0.015 260);
+  --input: oklch(0.27 0.015 260);
+  --ring: oklch(0.585 0.22 264);
+
+  --radius: 0.625rem;
 }
 
-body {
-  background: var(--color-background);
-  color: var(--color-foreground);
-  font-family: var(--font-sans), system-ui, sans-serif;
+/* ── Base layer ── */
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+    box-sizing: border-box;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-sans);
+  }
+  html {
+    @apply font-sans antialiased;
+  }
 }
 
-/* ── Animated gradient background ── */
+/* ── Subtle grid background ── */
 .bg-grid {
   background-image:
-    linear-gradient(rgba(108, 92, 231, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(108, 92, 231, 0.03) 1px, transparent 1px);
+    linear-gradient(oklch(0.585 0.22 264 / 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, oklch(0.585 0.22 264 / 0.04) 1px, transparent 1px);
   background-size: 60px 60px;
 }
 
 /* ── Glow effects ── */
-.glow-purple {
-  box-shadow: 0 0 30px rgba(108, 92, 231, 0.15), 0 0 60px rgba(108, 92, 231, 0.05);
+.glow-primary {
+  box-shadow:
+    0 0 24px oklch(0.585 0.22 264 / 0.12),
+    0 0 48px oklch(0.585 0.22 264 / 0.04);
 }
 
-.glow-purple-lg {
-  box-shadow: 0 0 50px rgba(108, 92, 231, 0.2), 0 0 100px rgba(108, 92, 231, 0.08);
+.glow-primary-lg {
+  box-shadow:
+    0 0 40px oklch(0.585 0.22 264 / 0.18),
+    0 0 80px oklch(0.585 0.22 264 / 0.06);
 }
 
-/* ── Pulse ring animation ── */
+/* ── Custom animations ── */
 @keyframes pulse-ring {
   0% { transform: scale(0.95); opacity: 1; }
   50% { transform: scale(1.15); opacity: 0; }
   100% { transform: scale(0.95); opacity: 0; }
 }
-
 .animate-pulse-ring {
   animation: pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
-/* ── Float animation ── */
 @keyframes float {
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-8px); }
 }
-
 .animate-float {
   animation: float 4s ease-in-out infinite;
 }
 
-/* ── Slide up animation ── */
 @keyframes slide-up {
   from { opacity: 0; transform: translateY(20px); }
   to { opacity: 1; transform: translateY(0); }
 }
-
 .animate-slide-up {
   animation: slide-up 0.5s ease-out forwards;
 }
 
-/* ── Shimmer ── */
 @keyframes shimmer {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
 }
-
 .animate-shimmer {
-  background: linear-gradient(90deg, transparent, rgba(108, 92, 231, 0.1), transparent);
+  background: linear-gradient(90deg, transparent, oklch(0.585 0.22 264 / 0.08), transparent);
   background-size: 200% 100%;
   animation: shimmer 3s linear infinite;
 }

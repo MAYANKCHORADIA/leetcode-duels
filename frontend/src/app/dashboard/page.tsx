@@ -6,7 +6,30 @@ import { useUserStore } from "@/store/userStore";
 import { useRoomStore } from "@/store/roomStore";
 import { getSocket } from "@/lib/socket";
 import FriendsSidebar from "@/components/FriendsSidebar";
+import Navbar from "@/components/Navbar";
+import LoadingSpinner from "@/components/LoadingSpinner";
 import { authClient } from "@/lib/authClient";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import {
+  Swords,
+  Rocket,
+  Trophy,
+  Copy,
+  Check,
+  ArrowLeft,
+  Loader2,
+  X,
+} from "lucide-react";
 
 // ─── Constants ──────────────────────────────────────────────────────
 const DIFFICULTIES = ["Easy", "Medium", "Hard"] as const;
@@ -34,8 +57,11 @@ export default function DashboardPage() {
   const router = useRouter();
 
   // ── UI State ──
-  const [view, setView] = useState<"dashboard" | "waiting" | "joining">("dashboard");
-  const [incomingChallenge, setIncomingChallenge] = useState<{ roomId: string, challenger: string } | null>(null);
+  const [view, setView] = useState<View>("dashboard");
+  const [incomingChallenge, setIncomingChallenge] = useState<{
+    roomId: string;
+    challenger: string;
+  } | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [roomId, setRoomId] = useState("");
   const [joinRoomId, setJoinRoomId] = useState("");
@@ -62,7 +88,6 @@ export default function DashboardPage() {
     }
   }, [isPending, data, user, router]);
 
-
   // ── Socket listeners ──
   useEffect(() => {
     const socket = getSocket();
@@ -73,7 +98,13 @@ export default function DashboardPage() {
       setView("waiting");
     };
 
-    const onMatchStart = ({ roomId, problem }: { roomId: string, problem: any }) => {
+    const onMatchStart = ({
+      roomId,
+      problem,
+    }: {
+      roomId: string;
+      problem: any;
+    }) => {
       setRoomState(roomId, problem);
       router.push(`/room/${roomId}`);
     };
@@ -83,7 +114,13 @@ export default function DashboardPage() {
       setIsJoining(false);
     };
 
-    const onChallengeReceived = ({ roomId, challenger }: { roomId: string, challenger: string }) => {
+    const onChallengeReceived = ({
+      roomId,
+      challenger,
+    }: {
+      roomId: string;
+      challenger: string;
+    }) => {
       setIncomingChallenge({ roomId, challenger });
     };
 
@@ -126,29 +163,34 @@ export default function DashboardPage() {
       roomId: joinRoomId.trim().toUpperCase(),
       user: { id: user.id, username: user.username },
     });
-    // Auto-reset joining state after a delay in case of network miss
     setTimeout(() => setIsJoining(false), 3000);
   }, [user, joinRoomId, isJoining]);
 
-  const handleChallenge = useCallback((friendId: string) => {
-    if (!user) return;
-    const currentUser = user;
-    const socket = getSocket();
-    
-    // We must listen for the room creation response exactly once for this challenge
-    const onRoomCreated = (roomId: string) => {
-       socket.emit("send_challenge", { friendId, roomId, challenger: currentUser.username });
-       socket.off("room_created", onRoomCreated);
-    };
-    socket.on("room_created", onRoomCreated);
+  const handleChallenge = useCallback(
+    (friendId: string) => {
+      if (!user) return;
+      const currentUser = user;
+      const socket = getSocket();
 
-    socket.emit("create_room", {
-      difficulty,
-      topic,
-      timeLimit,
-      user: { id: currentUser.id, username: currentUser.username },
-    });
-  }, [user, difficulty, topic, timeLimit]);
+      const onRoomCreated = (roomId: string) => {
+        socket.emit("send_challenge", {
+          friendId,
+          roomId,
+          challenger: currentUser.username,
+        });
+        socket.off("room_created", onRoomCreated);
+      };
+      socket.on("room_created", onRoomCreated);
+
+      socket.emit("create_room", {
+        difficulty,
+        topic,
+        timeLimit,
+        user: { id: currentUser.id, username: currentUser.username },
+      });
+    },
+    [user, difficulty, topic, timeLimit]
+  );
 
   const copyRoomId = useCallback(() => {
     navigator.clipboard.writeText(roomId);
@@ -156,370 +198,391 @@ export default function DashboardPage() {
     setTimeout(() => setCopied(false), 2000);
   }, [roomId]);
 
-  // Handle Loading Session State
-  if (isPending) {
-    return (
-      <div className="h-screen flex items-center justify-center bg-grid">
-        <div className="animate-spin text-primary rounded-full h-8 w-8 border-b-2 border-primary"></div>
-      </div>
-    );
-  }
-
-  // Handle Unauthorized State (Render)
-  if (!isPending && !data?.session && !user) {
-    return null;
-  }
-
-  // Double check user hydration
+  // ── Loading / Auth Guards ──
+  if (isPending) return <LoadingSpinner message="Loading session..." />;
+  if (!isPending && !data?.session && !user) return null;
   if (!user) return null;
 
   return (
-    <div className="h-screen flex flex-col bg-grid">
-      {/* Navigation Bar */}
-      <header className="w-full bg-surface border-b border-border p-4 px-6 flex justify-between items-center z-50">
-        <div className="font-bold text-xl text-transparent bg-clip-text bg-gradient-to-r from-primary to-accent">LeetCode Duels</div>
-        <div className="flex items-center gap-6">
-          <button onClick={() => router.push(`/profile/${user.username}`)} className="text-sm font-semibold hover:text-primary transition-colors text-foreground/80">
-            Profile
-          </button>
-          <button onClick={() => { useUserStore.getState().clearUser(); router.replace("/") }} className="text-sm font-semibold text-destructive hover:text-destructive/80 transition-colors">
-            Logout
-          </button>
-        </div>
-      </header>
+    <div className="h-screen flex flex-col">
+      <Navbar />
 
       <div className="flex-1 flex overflow-hidden">
-        {view === "dashboard" && <FriendsSidebar currentUser={user} onChallenge={handleChallenge} />}
-        
-        <main className="flex-1 overflow-y-auto px-4 py-10 flex flex-col items-center relative">
-          {/* Ambient glow */}
-          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[400px] rounded-full bg-primary/5 blur-[150px] pointer-events-none" />
+        {view === "dashboard" && (
+          <FriendsSidebar currentUser={user} onChallenge={handleChallenge} />
+        )}
 
-          {/* ═══════════════ DASHBOARD VIEW ═══════════════ */}
-          {view === "dashboard" && (
-            <div className="relative w-full max-w-2xl animate-slide-up">
-              {/* User Info Card */}
-              <div className="bg-surface border border-border rounded-2xl p-6 mb-8 glow-purple">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h1 className="text-xl font-bold text-foreground">
-                      Welcome back,{" "}
-                      <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-                        {user.username}
-                      </span>
-                    </h1>
-                    <p className="text-muted text-sm mt-1">{user.collegeName}</p>
+        <main className="flex-1 overflow-y-auto px-4 py-10 flex flex-col items-center">
+          <div className="w-full max-w-5xl mx-auto">
+            {/* ═══════ DASHBOARD VIEW ═══════ */}
+            {view === "dashboard" && (
+              <div className="animate-slide-up flex flex-col gap-6">
+                {/* User Info Card */}
+                <Card className="glow-primary">
+                  <CardContent className="flex items-center justify-between">
+                    <div>
+                      <h1 className="text-xl font-semibold text-foreground">
+                        Welcome back,{" "}
+                        <span className="text-primary font-mono">
+                          {user.username}
+                        </span>
+                      </h1>
+                      <p className="text-sm font-medium text-muted-foreground mt-1">
+                        {user.collegeName}
+                      </p>
+                    </div>
+                    <div className="text-right flex flex-col items-end gap-2">
+                      <div className="text-2xl font-semibold font-mono text-foreground">
+                        {user.eloRating}
+                      </div>
+                      <p className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
+                        Elo Rating
+                      </p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => router.push("/leaderboard")}
+                        className="cursor-pointer"
+                      >
+                        <Trophy className="size-4" />
+                        View Leaderboard
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Action Buttons */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <Card
+                    className="group cursor-pointer hover:border-primary/50 transition-all"
+                    onClick={() => setShowModal(true)}
+                  >
+                    <CardContent className="p-6">
+                      <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                        <Swords className="size-6 text-primary" />
+                      </div>
+                      <h3 className="text-lg font-semibold text-foreground mb-1">
+                        Create Room
+                      </h3>
+                      <p className="text-sm font-medium text-muted-foreground">
+                        Set the rules. Challenge a friend.
+                      </p>
+                    </CardContent>
+                  </Card>
+
+                  <Card
+                    className="group cursor-pointer hover:border-accent/50 transition-all"
+                    onClick={() => setView("joining")}
+                  >
+                    <CardContent className="p-6">
+                      <div className="w-12 h-12 rounded-xl bg-accent/10 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                        <Rocket className="size-6 text-accent" />
+                      </div>
+                      <h3 className="text-lg font-semibold text-foreground mb-1">
+                        Join Room
+                      </h3>
+                      <p className="text-sm font-medium text-muted-foreground">
+                        Got a code? Jump into a duel.
+                      </p>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Embedded Chat */}
+                <Card className="overflow-hidden glow-primary">
+                  <div className="flex items-center gap-2 px-5 py-3 border-b border-border">
+                    <span className="text-lg">💬</span>
+                    <h3 className="text-sm font-semibold text-foreground">
+                      Global Chat
+                    </h3>
+                    <span className="text-sm text-muted-foreground ml-auto">
+                      Powered by Rocket.Chat
+                    </span>
                   </div>
-              <div className="text-right flex flex-col items-end">
-                <div className="text-3xl font-bold font-mono bg-gradient-to-b from-foreground to-muted bg-clip-text text-transparent">
-                  {user.eloRating}
-                </div>
-                <div className="text-xs text-muted uppercase tracking-wider mb-2">
-                  Elo Rating
-                </div>
-                <button
-                  onClick={() => router.push("/leaderboard")}
-                  className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors cursor-pointer shadow-sm"
-                >
-                  🏆 View Leaderboard
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Action Buttons */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <button
-              onClick={() => setShowModal(true)}
-              className="group relative bg-surface border border-border rounded-2xl p-6
-                         hover:border-primary/50 hover:bg-surface-hover
-                         transition-all duration-300 cursor-pointer text-left"
-            >
-              <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-              <div className="relative">
-                <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                  <span className="text-2xl">⚔️</span>
-                </div>
-                <h3 className="font-semibold text-foreground mb-1">
-                  Create Room
-                </h3>
-                <p className="text-sm text-muted">
-                  Set the rules. Challenge a friend.
-                </p>
-              </div>
-            </button>
-
-            <button
-              onClick={() => setView("joining")}
-              className="group relative bg-surface border border-border rounded-2xl p-6
-                         hover:border-accent/50 hover:bg-surface-hover
-                         transition-all duration-300 cursor-pointer text-left"
-            >
-              <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-accent/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-              <div className="relative">
-                <div className="w-12 h-12 rounded-xl bg-accent/10 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                  <span className="text-2xl">🚀</span>
-                </div>
-                <h3 className="font-semibold text-foreground mb-1">
-                  Join Room
-                </h3>
-                <p className="text-sm text-muted">
-                  Got a code? Jump into a duel.
-                </p>
-              </div>
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ═══════════════ WAITING LOBBY ═══════════════ */}
-      {view === "waiting" && (
-        <div className="relative w-full max-w-md text-center animate-slide-up">
-          <div className="bg-surface border border-border rounded-2xl p-10 glow-purple-lg">
-            {/* Pulsing ring */}
-            <div className="relative w-24 h-24 mx-auto mb-8">
-              <div className="absolute inset-0 rounded-full border-2 border-primary/30 animate-pulse-ring" />
-              <div className="absolute inset-2 rounded-full border-2 border-primary/20 animate-pulse-ring [animation-delay:0.5s]" />
-              <div className="w-full h-full rounded-full bg-primary/10 flex items-center justify-center">
-                <span className="text-3xl animate-float">⚔️</span>
-              </div>
-            </div>
-
-            <h2 className="text-xl font-bold text-foreground mb-2">
-              Waiting for Opponent...
-            </h2>
-            <p className="text-sm text-muted mb-8">
-              Share the room code with your challenger
-            </p>
-
-            {/* Room ID display */}
-            <div className="bg-background border border-border rounded-xl p-4 mb-6">
-              <div className="text-xs text-muted uppercase tracking-wider mb-2">
-                Room Code
-              </div>
-              <div className="text-3xl font-bold font-mono tracking-[0.3em] text-foreground">
-                {roomId}
-              </div>
-            </div>
-
-            <button
-              onClick={copyRoomId}
-              className="w-full py-3 rounded-xl font-medium text-sm cursor-pointer
-                         bg-primary/10 text-primary border border-primary/20
-                         hover:bg-primary/20 transition-all duration-200"
-            >
-              {copied ? "✓ Copied!" : "📋 Copy Room Code"}
-            </button>
-
-            <button
-              onClick={() => {
-                setView("dashboard");
-                setRoomId("");
-              }}
-              className="mt-4 text-sm text-muted hover:text-foreground transition-colors cursor-pointer"
-            >
-              ← Back to Dashboard
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ═══════════════ JOIN ROOM VIEW ═══════════════ */}
-      {view === "joining" && (
-        <div className="relative w-full max-w-md animate-slide-up">
-          <div className="bg-surface border border-border rounded-2xl p-8 glow-purple">
-            <h2 className="text-xl font-bold text-foreground mb-2">
-              Join a Room
-            </h2>
-            <p className="text-sm text-muted mb-6">
-              Enter the room code shared by your opponent
-            </p>
-
-            <input
-              type="text"
-              placeholder="e.g. A3B7K9"
-              value={joinRoomId}
-              onChange={(e) =>
-                setJoinRoomId(e.target.value.toUpperCase().slice(0, 6))
-              }
-              className="w-full px-4 py-4 bg-background border border-border rounded-xl
-                         text-foreground text-center text-2xl font-mono tracking-[0.3em]
-                         placeholder:text-muted/30 placeholder:text-lg placeholder:tracking-normal
-                         outline-none focus:border-primary focus:ring-1 focus:ring-primary/30
-                         transition-all duration-200 mb-4"
-              maxLength={6}
-            />
-
-            {error && (
-              <div className="text-danger text-sm bg-danger/10 border border-danger/20 rounded-lg px-4 py-2 mb-4">
-                {error}
+                  <iframe
+                    src="http://localhost:3000/channel/general?layout=embedded"
+                    width="100%"
+                    height="400"
+                    style={{ border: "none", display: "block" }}
+                    allow="camera; microphone"
+                  />
+                </Card>
               </div>
             )}
 
-            <button
-              onClick={handleJoinRoom}
-              disabled={joinRoomId.length < 6 || isJoining}
-              className="w-full py-3 rounded-xl font-semibold text-white cursor-pointer
-                         bg-gradient-to-r from-primary to-accent
-                         hover:from-primary-hover hover:to-accent
-                         disabled:opacity-40 disabled:cursor-not-allowed
-                         transition-all duration-300
-                         shadow-lg shadow-primary/20 hover:shadow-primary/40"
-            >
-              {isJoining ? "Joining..." : "Join Duel →"}
-            </button>
+            {/* ═══════ WAITING LOBBY ═══════ */}
+            {view === "waiting" && (
+              <div className="flex justify-center animate-slide-up">
+                <Card className="w-full max-w-md text-center glow-primary-lg">
+                  <CardContent className="p-8 flex flex-col items-center gap-6">
+                    {/* Pulsing ring */}
+                    <div className="relative w-24 h-24">
+                      <div className="absolute inset-0 rounded-full border-2 border-primary/30 animate-pulse-ring" />
+                      <div className="absolute inset-2 rounded-full border-2 border-primary/20 animate-pulse-ring [animation-delay:0.5s]" />
+                      <div className="w-full h-full rounded-full bg-primary/10 flex items-center justify-center">
+                        <Swords className="size-8 text-primary animate-float" />
+                      </div>
+                    </div>
 
-            <button
-              onClick={() => {
-                setView("dashboard");
-                setJoinRoomId("");
-                setError("");
-              }}
-              className="mt-4 w-full text-sm text-muted hover:text-foreground transition-colors cursor-pointer"
-            >
-              ← Back to Dashboard
-            </button>
+                    <div>
+                      <h2 className="text-xl font-semibold text-foreground mb-2">
+                        Waiting for Opponent...
+                      </h2>
+                      <p className="text-sm font-medium text-muted-foreground">
+                        Share the room code with your challenger
+                      </p>
+                    </div>
+
+                    {/* Room ID display */}
+                    <div className="w-full bg-background border border-border rounded-xl p-4">
+                      <p className="text-sm text-muted-foreground uppercase tracking-wider mb-2">
+                        Room Code
+                      </p>
+                      <p className="text-2xl font-semibold font-mono tracking-widest text-foreground">
+                        {roomId}
+                      </p>
+                    </div>
+
+                    <Button
+                      variant="outline"
+                      className="w-full cursor-pointer"
+                      onClick={copyRoomId}
+                    >
+                      {copied ? (
+                        <>
+                          <Check className="size-4" /> Copied!
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="size-4" /> Copy Room Code
+                        </>
+                      )}
+                    </Button>
+
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setView("dashboard");
+                        setRoomId("");
+                      }}
+                      className="cursor-pointer"
+                    >
+                      <ArrowLeft className="size-4" />
+                      Back to Dashboard
+                    </Button>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+
+            {/* ═══════ JOIN ROOM VIEW ═══════ */}
+            {view === "joining" && (
+              <div className="flex justify-center animate-slide-up">
+                <Card className="w-full max-w-md glow-primary">
+                  <CardHeader>
+                    <CardTitle>Join a Room</CardTitle>
+                    <CardDescription>
+                      Enter the room code shared by your opponent
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="flex flex-col gap-4">
+                    <Input
+                      type="text"
+                      placeholder="e.g. A3B7K9"
+                      value={joinRoomId}
+                      onChange={(e) =>
+                        setJoinRoomId(
+                          e.target.value.toUpperCase().slice(0, 6)
+                        )
+                      }
+                      className="text-center text-2xl font-mono tracking-widest"
+                      maxLength={6}
+                    />
+
+                    {error && (
+                      <div className="text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-lg px-4 py-2">
+                        {error}
+                      </div>
+                    )}
+
+                    <Button
+                      onClick={handleJoinRoom}
+                      disabled={joinRoomId.length < 6 || isJoining}
+                      className="w-full cursor-pointer"
+                      size="lg"
+                    >
+                      {isJoining ? (
+                        <>
+                          <Loader2 className="size-4 animate-spin" />
+                          Joining...
+                        </>
+                      ) : (
+                        "Join Duel →"
+                      )}
+                    </Button>
+
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setView("dashboard");
+                        setJoinRoomId("");
+                        setError("");
+                      }}
+                      className="cursor-pointer"
+                    >
+                      <ArrowLeft className="size-4" />
+                      Back to Dashboard
+                    </Button>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        </main>
+      </div>
 
-      {/* ═══════════════ CREATE ROOM MODAL ═══════════════ */}
-      {showModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center px-4"
-          onClick={() => setShowModal(false)}
-        >
-          {/* Backdrop */}
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+      {/* ═══════ CREATE ROOM MODAL ═══════ */}
+      <Dialog open={showModal} onOpenChange={setShowModal}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Create a Room</DialogTitle>
+            <DialogDescription>
+              Configure your duel settings, then create the room.
+            </DialogDescription>
+          </DialogHeader>
 
-          {/* Modal */}
-          <div
-            className="relative bg-surface border border-border rounded-2xl p-8 w-full max-w-lg animate-slide-up glow-purple-lg"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-bold text-foreground">
-                Create a Room
-              </h2>
-              <button
-                onClick={() => setShowModal(false)}
-                className="w-8 h-8 rounded-lg bg-background border border-border flex items-center justify-center
-                           text-muted hover:text-foreground hover:border-border-hover transition-all cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
-
+          <div className="flex flex-col gap-5 pt-2">
             {/* Difficulty */}
-            <div className="mb-5">
-              <label className="block text-sm font-medium text-foreground/80 mb-2.5">
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-medium text-foreground">
                 Difficulty
               </label>
               <div className="grid grid-cols-3 gap-2">
                 {DIFFICULTIES.map((d) => (
-                  <button
+                  <Button
                     key={d}
+                    variant={difficulty === d ? "default" : "outline"}
+                    size="sm"
                     onClick={() => setDifficulty(d)}
-                    className={`py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer border ${
+                    className={`cursor-pointer ${
                       difficulty === d
                         ? d === "Easy"
-                          ? "bg-success/15 text-success border-success/30"
+                          ? "bg-success text-white hover:bg-success/80"
                           : d === "Medium"
-                          ? "bg-yellow-500/15 text-yellow-400 border-yellow-500/30"
-                          : "bg-danger/15 text-danger border-danger/30"
-                        : "bg-background border-border text-muted hover:text-foreground hover:border-border-hover"
+                          ? "bg-warning text-white hover:bg-warning/80"
+                          : "bg-destructive text-white hover:bg-destructive/80"
+                        : ""
                     }`}
                   >
                     {d}
-                  </button>
+                  </Button>
                 ))}
               </div>
             </div>
 
             {/* Topic */}
-            <div className="mb-5">
-              <label className="block text-sm font-medium text-foreground/80 mb-2.5">
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-medium text-foreground">
                 Topic
               </label>
               <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto pr-1">
                 {TOPICS.map((t) => (
-                  <button
+                  <Button
                     key={t}
+                    variant={topic === t ? "default" : "outline"}
+                    size="sm"
                     onClick={() => setTopic(t)}
-                    className={`py-2 px-3 rounded-xl text-sm transition-all duration-200 cursor-pointer border text-left ${
-                      topic === t
-                        ? "bg-primary/15 text-primary border-primary/30"
-                        : "bg-background border-border text-muted hover:text-foreground hover:border-border-hover"
-                    }`}
+                    className="cursor-pointer justify-start"
                   >
                     {t}
-                  </button>
+                  </Button>
                 ))}
               </div>
             </div>
 
             {/* Time Limit */}
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-foreground/80 mb-2.5">
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-medium text-foreground">
                 Time Limit
               </label>
               <div className="grid grid-cols-3 gap-2">
                 {TIME_LIMITS.map((t) => (
-                  <button
+                  <Button
                     key={t}
+                    variant={timeLimit === t ? "default" : "outline"}
+                    size="sm"
                     onClick={() => setTimeLimit(t)}
-                    className={`py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer border ${
-                      timeLimit === t
-                        ? "bg-primary/15 text-primary border-primary/30"
-                        : "bg-background border-border text-muted hover:text-foreground hover:border-border-hover"
-                    }`}
+                    className="cursor-pointer"
                   >
                     {t} min
-                  </button>
+                  </Button>
                 ))}
               </div>
             </div>
 
             {error && (
-              <div className="text-danger text-sm bg-danger/10 border border-danger/20 rounded-lg px-4 py-2 mb-4">
+              <div className="text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-lg px-4 py-2">
                 {error}
               </div>
             )}
 
-            <button
+            <Button
               onClick={handleCreateRoom}
-              className="w-full py-3 rounded-xl font-semibold text-white cursor-pointer
-                         bg-gradient-to-r from-primary to-accent
-                         hover:from-primary-hover hover:to-accent
-                         transition-all duration-300
-                         shadow-lg shadow-primary/20 hover:shadow-primary/40"
+              className="w-full cursor-pointer"
+              size="lg"
             >
-              Create Room ⚔️
-            </button>
+              <Swords className="size-4" />
+              Create Room
+            </Button>
           </div>
-        </div>
-      )}
-        </main>
-      </div>
+        </DialogContent>
+      </Dialog>
 
-      {/* Incoming Challenge Modal */}
-      {incomingChallenge && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center animate-fade-in px-4">
-          <div className="bg-surface p-8 rounded-2xl border border-primary/50 text-center max-w-sm w-full glow-purple">
-            <h3 className="text-xl text-foreground font-bold mb-2">⚔️ Challenge Received</h3>
-            <p className="text-muted text-sm mb-6"><span className="text-primary font-semibold">{incomingChallenge.challenger}</span> has challenged you to a duel!</p>
-            <div className="flex gap-4 justify-center">
-              <button onClick={() => {
+      {/* ═══════ INCOMING CHALLENGE DIALOG ═══════ */}
+      <Dialog
+        open={!!incomingChallenge}
+        onOpenChange={() => setIncomingChallenge(null)}
+      >
+        <DialogContent className="sm:max-w-sm text-center">
+          <DialogHeader>
+            <DialogTitle className="flex items-center justify-center gap-2">
+              <Swords className="size-5 text-primary" />
+              Challenge Received
+            </DialogTitle>
+            <DialogDescription>
+              <span className="text-primary font-semibold font-mono">
+                {incomingChallenge?.challenger}
+              </span>{" "}
+              has challenged you to a duel!
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex gap-4 justify-center pt-4">
+            <Button
+              onClick={() => {
                 const socket = getSocket();
-                socket.emit("join_room", { roomId: incomingChallenge.roomId, user: {id: user.id, username: user.username} });
+                socket.emit("join_room", {
+                  roomId: incomingChallenge!.roomId,
+                  user: { id: user.id, username: user.username },
+                });
                 setIncomingChallenge(null);
-                setIsJoining(true); // show joining state temporarily until match_start redirects
-              }} className="bg-primary text-white font-semibold flex-1 py-2.5 rounded-xl hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20">Accept</button>
-              <button onClick={() => setIncomingChallenge(null)} className="bg-destructive/10 text-destructive border border-destructive/20 font-semibold flex-1 py-2.5 rounded-xl hover:bg-destructive/20 transition-colors">Decline</button>
-            </div>
+                setIsJoining(true);
+              }}
+              className="flex-1 cursor-pointer"
+            >
+              Accept
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => setIncomingChallenge(null)}
+              className="flex-1 cursor-pointer"
+            >
+              Decline
+            </Button>
           </div>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

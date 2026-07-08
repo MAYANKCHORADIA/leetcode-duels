@@ -7,6 +7,27 @@ import { useRoomStore } from "@/store/roomStore";
 import { getSocket } from "@/lib/socket";
 import { authClient } from "@/lib/authClient";
 import Editor from "@monaco-editor/react";
+import LoadingSpinner from "@/components/LoadingSpinner";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import {
+  Swords,
+  Flag,
+  Play,
+  CheckCircle2,
+  XCircle,
+  Loader2,
+  X,
+  ArrowRight,
+} from "lucide-react";
 
 // ─── Types ──────────────────────────────────────────────────────────
 interface TestResult {
@@ -38,9 +59,6 @@ interface MatchOverData {
   duration: number;
 }
 
-// ─── Dynamic Problem ──────────────────────────────────────────────
-// Problem is dynamically passed via Zustand roomStore
-
 const DEFAULT_CODE = `#include <bits/stdc++.h>
 using namespace std;
 
@@ -59,17 +77,17 @@ const LANGUAGES = [
   { label: "Java", value: "java" },
 ] as const;
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8080";
+const BACKEND_URL =
+  process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8080";
 
 // ─── Component ──────────────────────────────────────────────────────
 export default function RoomPage() {
   const { id: roomId } = useParams<{ id: string }>();
   const router = useRouter();
-  
+
   const { data, isPending } = authClient.useSession();
   const user = useUserStore((s) => s.user);
   const setUser = useUserStore((s) => s.setUser);
-  
   const problem = useRoomStore((s) => s.problem);
 
   useEffect(() => {
@@ -90,8 +108,6 @@ export default function RoomPage() {
     }
   }, [isPending, data, user, router]);
 
-
-
   // Editor state
   const [code, setCode] = useState(DEFAULT_CODE);
   const [language, setLanguage] = useState("cpp");
@@ -106,12 +122,20 @@ export default function RoomPage() {
 
   // Opponent & Match state
   const [opponentTyping, setOpponentTyping] = useState(false);
-  const [opponentProgress, setOpponentProgress] = useState<{ username: string; passed: number; total: number } | null>(null);
-  const [matchOverData, setMatchOverData] = useState<MatchOverData | null>(null);
-  
+  const [opponentProgress, setOpponentProgress] = useState<{
+    username: string;
+    passed: number;
+    total: number;
+  } | null>(null);
+  const [matchOverData, setMatchOverData] = useState<MatchOverData | null>(
+    null
+  );
+
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const progressTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const progressTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
 
   // ── Socket listeners ──
   useEffect(() => {
@@ -120,13 +144,28 @@ export default function RoomPage() {
     const onOpponentTyping = () => {
       setOpponentTyping(true);
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-      typingTimeoutRef.current = setTimeout(() => setOpponentTyping(false), 2000);
+      typingTimeoutRef.current = setTimeout(
+        () => setOpponentTyping(false),
+        2000
+      );
     };
 
-    const onOpponentProgress = ({ username, passed, total }: { username: string; passed: number; total: number }) => {
+    const onOpponentProgress = ({
+      username,
+      passed,
+      total,
+    }: {
+      username: string;
+      passed: number;
+      total: number;
+    }) => {
       setOpponentProgress({ username, passed, total });
-      if (progressTimeoutRef.current) clearTimeout(progressTimeoutRef.current);
-      progressTimeoutRef.current = setTimeout(() => setOpponentProgress(null), 8000);
+      if (progressTimeoutRef.current)
+        clearTimeout(progressTimeoutRef.current);
+      progressTimeoutRef.current = setTimeout(
+        () => setOpponentProgress(null),
+        8000
+      );
     };
 
     const onMatchOver = (data: MatchOverData) => {
@@ -142,22 +181,27 @@ export default function RoomPage() {
       socket.off("opponent_progress", onOpponentProgress);
       socket.off("match_over", onMatchOver);
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-      if (progressTimeoutRef.current) clearTimeout(progressTimeoutRef.current);
+      if (progressTimeoutRef.current)
+        clearTimeout(progressTimeoutRef.current);
     };
   }, []);
 
   // ── Debounced code_update emitter ──
-  const handleEditorChange = useCallback((val: string | undefined) => {
-    if (matchOverData) return; // Disable typing if match over
-    const newVal = val || "";
-    setCode(newVal);
+  const handleEditorChange = useCallback(
+    (val: string | undefined) => {
+      if (matchOverData) return;
+      const newVal = val || "";
+      setCode(newVal);
 
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      const socket = getSocket();
-      socket.emit("code_update", { roomId, userId: user?.id });
-    }, 300);
-  }, [roomId, user, matchOverData]);
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        const socket = getSocket();
+        socket.emit("code_update", { roomId, userId: user?.id });
+      }, 300);
+    },
+    [roomId, user, matchOverData]
+  );
+
   const handleForfeit = useCallback(() => {
     const socket = getSocket();
     socket.emit("forfeit_match", { roomId, userId: user?.id });
@@ -208,7 +252,9 @@ export default function RoomPage() {
           socket.emit("match_won", { roomId, userId: user?.id });
         }
       } catch (err: unknown) {
-        setExecError(err instanceof Error ? err.message : "Execution failed");
+        setExecError(
+          err instanceof Error ? err.message : "Execution failed"
+        );
       } finally {
         setRunning(false);
         setSubmitting(false);
@@ -217,145 +263,176 @@ export default function RoomPage() {
     [code, language, roomId, user]
   );
 
-  // Handle Loading Session State
-  if (isPending) {
-    return (
-      <div className="h-screen flex items-center justify-center bg-grid">
-        <div className="animate-spin text-primary rounded-full h-8 w-8 border-b-2 border-primary"></div>
-      </div>
-    );
-  }
+  // ── Loading / Auth Guards ──
+  if (isPending) return <LoadingSpinner message="Loading session..." />;
+  if (!isPending && !data?.session && !user) return null;
 
-  // Handle Unauthorized State (Render)
-  if (!isPending && !data?.session && !user) {
-    return null;
-  }
+  const isWinner = matchOverData?.winnerId === user?.id;
 
   return (
     <main className="flex-1 flex flex-col h-screen overflow-hidden relative">
-      {/* Forfeit Confirmation Modal */}
-      {showForfeitModal && !matchOverData && (
-        <div className="absolute inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-sm bg-surface border border-destructive/30 shadow-2xl shadow-destructive/10 rounded-2xl p-6 text-center animate-fade-in">
-            <h3 className="text-xl font-bold text-foreground mb-2">Are you sure?</h3>
-            <p className="text-muted text-sm mb-6">You will instantly lose Elo rating and the match will end.</p>
-            <div className="flex gap-4 justify-center">
-               <button onClick={handleForfeit} className="flex-1 py-2.5 rounded-xl bg-destructive font-semibold text-white hover:bg-destructive/90 transition-colors shadow-lg shadow-destructive/20">Yes, Forfeit</button>
-               <button onClick={() => setShowForfeitModal(false)} className="flex-1 py-2.5 rounded-xl bg-surface border border-border font-semibold hover:bg-background transition-colors">Cancel</button>
-            </div>
+      {/* ─── Forfeit Confirmation Dialog ─── */}
+      <Dialog
+        open={showForfeitModal && !matchOverData}
+        onOpenChange={setShowForfeitModal}
+      >
+        <DialogContent className="sm:max-w-sm text-center">
+          <DialogHeader>
+            <DialogTitle>Are you sure?</DialogTitle>
+            <DialogDescription>
+              You will instantly lose Elo rating and the match will end.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex gap-4 justify-center pt-4">
+            <Button
+              variant="destructive"
+              onClick={handleForfeit}
+              className="flex-1 cursor-pointer"
+            >
+              Yes, Forfeit
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setShowForfeitModal(false)}
+              className="flex-1 cursor-pointer"
+            >
+              Cancel
+            </Button>
           </div>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
 
-      {/* ─── Match Over Modal ─── */}
-      {matchOverData && (
-        <div className="absolute inset-0 z-50 bg-background/80 backdrop-blur flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-surface border border-border shadow-2xl rounded-2xl overflow-hidden animate-slide-up">
-            <div className="p-8 text-center space-y-6">
-              {matchOverData.winnerId === user?.id ? (
-                <h2 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-br from-success to-accent">Victory!</h2>
-              ) : (
-                <h2 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-br from-danger to-accent">Defeat</h2>
-              )}
-              <p className="text-muted text-sm font-medium">
-                {matchOverData.winnerId === user?.id 
-                  ? "You solved the problem first!" 
-                  : `${matchOverData.winnerUsername} solved the problem first!`}
-              </p>
-              
-              <div className="space-y-4 pt-4 border-t border-border">
-                {/* Current Player Stats */}
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted">Your Rating</span>
-                  {matchOverData.winnerId === user?.id ? (
-                    <span className="font-mono text-success font-bold">
-                      {matchOverData.newWinnerElo - matchOverData.winnerGain} ➔ {matchOverData.newWinnerElo} (+{matchOverData.winnerGain})
+      {/* ─── Match Over Dialog ─── */}
+      <Dialog open={!!matchOverData} onOpenChange={() => {}}>
+        <DialogContent className="sm:max-w-md">
+          <div className="text-center flex flex-col gap-6">
+            <h2
+              className={`text-2xl font-semibold ${
+                isWinner ? "text-success" : "text-destructive"
+              }`}
+            >
+              {isWinner ? "🏆 Victory!" : "💀 Defeat"}
+            </h2>
+            <p className="text-sm font-medium text-muted-foreground">
+              {isWinner
+                ? "You solved the problem first!"
+                : `${matchOverData?.winnerUsername} solved the problem first!`}
+            </p>
+
+            {matchOverData && (
+              <div className="flex flex-col gap-3 pt-4 border-t border-border text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Your Rating</span>
+                  {isWinner ? (
+                    <span className="font-mono font-semibold text-success">
+                      {matchOverData.newWinnerElo -
+                        matchOverData.winnerGain}{" "}
+                      → {matchOverData.newWinnerElo} (+
+                      {matchOverData.winnerGain})
                     </span>
                   ) : (
-                    <span className="font-mono text-danger font-bold">
-                      {matchOverData.newLoserElo - matchOverData.loserLoss} ➔ {matchOverData.newLoserElo} ({matchOverData.loserLoss})
+                    <span className="font-mono font-semibold text-destructive">
+                      {matchOverData.newLoserElo -
+                        matchOverData.loserLoss}{" "}
+                      → {matchOverData.newLoserElo} (
+                      {matchOverData.loserLoss})
                     </span>
                   )}
                 </div>
-                
-                {/* Opponent Stats */}
-                <div className="flex items-center justify-between text-sm text-muted">
+
+                <div className="flex items-center justify-between text-muted-foreground">
                   <span>Opponent Rating</span>
-                  {matchOverData.winnerId !== user?.id ? (
+                  {!isWinner ? (
                     <span className="font-mono">
-                      {matchOverData.newWinnerElo - matchOverData.winnerGain} ➔ {matchOverData.newWinnerElo} (+{matchOverData.winnerGain})
+                      {matchOverData.newWinnerElo -
+                        matchOverData.winnerGain}{" "}
+                      → {matchOverData.newWinnerElo} (+
+                      {matchOverData.winnerGain})
                     </span>
                   ) : (
                     <span className="font-mono">
-                      {matchOverData.newLoserElo - matchOverData.loserLoss} ➔ {matchOverData.newLoserElo} ({matchOverData.loserLoss})
+                      {matchOverData.newLoserElo -
+                        matchOverData.loserLoss}{" "}
+                      → {matchOverData.newLoserElo} (
+                      {matchOverData.loserLoss})
                     </span>
                   )}
                 </div>
-                
-                <div className="flex items-center justify-between text-sm text-muted">
+
+                <div className="flex items-center justify-between text-muted-foreground">
                   <span>Duration</span>
-                  <span className="font-mono">{Math.floor(matchOverData.duration / 60)}:{(matchOverData.duration % 60).toString().padStart(2, '0')}</span>
+                  <span className="font-mono">
+                    {Math.floor(matchOverData.duration / 60)}:
+                    {(matchOverData.duration % 60)
+                      .toString()
+                      .padStart(2, "0")}
+                  </span>
                 </div>
               </div>
-            </div>
-            <div className="p-4 bg-background border-t border-border flex justify-center">
-              <button 
-                onClick={() => router.push("/dashboard")}
-                className="w-full px-4 py-3 bg-gradient-to-r from-primary to-accent text-white font-bold rounded-xl shadow-lg shadow-primary/20 hover:shadow-primary/40 hover:-translate-y-0.5 transition-all duration-300 cursor-pointer"
-              >
-                Return to Dashboard
-              </button>
-            </div>
+            )}
+
+            <Button
+              onClick={() => router.push("/dashboard")}
+              className="w-full cursor-pointer"
+              size="lg"
+            >
+              Return to Dashboard
+              <ArrowRight className="size-4" />
+            </Button>
           </div>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
 
       {/* ─── Top Bar ─── */}
-      <header className="flex items-center justify-between px-5 py-3 bg-surface border-b border-border shrink-0 z-10">
-        <div className="flex items-center gap-5">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-accent flex items-center justify-center text-white text-sm font-bold shadow-sm shadow-primary/20">
+      <header className="flex items-center justify-between px-6 py-3 bg-card border-b border-border shrink-0 z-10">
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-primary-foreground text-sm font-semibold">
               ⚔
             </div>
-            <span className="font-semibold text-foreground text-sm">
+            <span className="text-sm font-semibold text-foreground">
               Room{" "}
               <span className="font-mono text-primary">{roomId}</span>
             </span>
           </div>
-          
-          <button 
-            onClick={() => setShowForfeitModal(true)} 
-            className="text-xs font-bold px-3 py-1.5 rounded-lg bg-destructive/10 text-destructive border border-destructive/20 hover:bg-destructive hover:text-white transition-colors flex items-center gap-1 shadow-sm"
+
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setShowForfeitModal(true)}
+            className="cursor-pointer"
           >
-            🏳️ Forfeit
-          </button>
+            <Flag className="size-4" />
+            Forfeit
+          </Button>
         </div>
 
         {/* Status badges */}
         <div className="flex items-center gap-3">
-          {/* Opponent progress badge */}
           {opponentProgress && (
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary/10 border border-primary/20 animate-slide-up">
-              <span className="text-xs font-medium text-primary">
-                🎯 {opponentProgress.username} passed {opponentProgress.passed}/{opponentProgress.total} tests
-              </span>
-            </div>
+            <Badge
+              variant="secondary"
+              className="animate-slide-up text-primary"
+            >
+              🎯 {opponentProgress.username} passed{" "}
+              {opponentProgress.passed}/{opponentProgress.total} tests
+            </Badge>
           )}
 
-          {/* Opponent typing badge */}
           {opponentTyping && !opponentProgress && (
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-accent/10 border border-accent/20 animate-slide-up">
-              <span className="relative flex h-2 w-2">
+            <Badge
+              variant="secondary"
+              className="animate-slide-up text-accent"
+            >
+              <span className="relative flex size-2 mr-1">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75" />
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-accent" />
+                <span className="relative inline-flex rounded-full size-2 bg-accent" />
               </span>
-              <span className="text-xs text-accent font-medium">
-                Opponent is typing...
-              </span>
-            </div>
+              Opponent typing...
+            </Badge>
           )}
 
-          <span className="text-xs font-mono text-muted">
+          <span className="font-mono text-sm text-muted-foreground">
             {user?.username ?? "—"}
           </span>
         </div>
@@ -364,26 +441,50 @@ export default function RoomPage() {
       {/* ─── Split Pane ─── */}
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 min-h-0">
         {/* ═══════ LEFT: Problem Description ═══════ */}
-        <section className="overflow-y-auto border-r border-border p-6 lg:p-8 scrollbar-thin">
+        <section className="overflow-y-auto border-r border-border p-6 lg:p-8">
           {problem ? (
             <>
               <div className="flex items-center gap-3 mb-6">
-                <h1 className="text-xl font-bold text-foreground">
+                <h1 className="text-xl font-semibold text-foreground">
                   {problem.title}
                 </h1>
-                <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-success/15 text-success border border-success/25">
+                <Badge
+                  variant="outline"
+                  className={
+                    problem.difficulty === "Easy"
+                      ? "text-success border-success/30"
+                      : problem.difficulty === "Medium"
+                      ? "text-warning border-warning/30"
+                      : "text-destructive border-destructive/30"
+                  }
+                >
                   {problem.difficulty}
-                </span>
+                </Badge>
               </div>
 
-              <div className="prose-invert text-sm text-foreground/85 leading-relaxed mb-8 space-y-3">
-                {problem.description.split("\n\n").map((p: string, i: number) => (
-                  <p key={i} dangerouslySetInnerHTML={{ __html: p.replace(/`([^`]+)`/g, '<code class="px-1.5 py-0.5 rounded bg-primary/10 text-primary text-xs font-mono">$1</code>').replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>') }} />
-                ))}
+              <div className="text-sm text-foreground/85 leading-relaxed flex flex-col gap-3">
+                {problem.description
+                  .split("\n\n")
+                  .map((p: string, i: number) => (
+                    <p
+                      key={i}
+                      dangerouslySetInnerHTML={{
+                        __html: p
+                          .replace(
+                            /`([^`]+)`/g,
+                            '<code class="px-1.5 py-0.5 rounded bg-primary/10 text-primary text-sm font-mono">$1</code>'
+                          )
+                          .replace(
+                            /\*\*([^*]+)\*\*/g,
+                            "<strong>$1</strong>"
+                          ),
+                      }}
+                    />
+                  ))}
               </div>
             </>
           ) : (
-            <div className="text-muted text-sm flex items-center justify-center h-full">
+            <div className="text-muted-foreground text-sm flex items-center justify-center h-full">
               Loading problem...
             </div>
           )}
@@ -392,19 +493,17 @@ export default function RoomPage() {
         {/* ═══════ RIGHT: Code Editor + Console ═══════ */}
         <section className="flex flex-col min-h-0">
           {/* Language selector */}
-          <div className="flex items-center gap-2 px-4 py-2.5 bg-surface border-b border-border shrink-0">
+          <div className="flex items-center gap-2 px-4 py-2 bg-card border-b border-border shrink-0">
             {LANGUAGES.map((lang) => (
-              <button
+              <Button
                 key={lang.value}
+                variant={language === lang.value ? "secondary" : "ghost"}
+                size="xs"
                 onClick={() => setLanguage(lang.value)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 cursor-pointer border ${
-                  language === lang.value
-                    ? "bg-primary/15 text-primary border-primary/30"
-                    : "bg-transparent text-muted border-transparent hover:text-foreground hover:bg-surface-hover"
-                }`}
+                className="cursor-pointer"
               >
                 {lang.label}
-              </button>
+              </Button>
             ))}
           </div>
 
@@ -430,7 +529,7 @@ export default function RoomPage() {
                 tabSize: 4,
                 wordWrap: "on",
                 automaticLayout: true,
-                readOnly: !!matchOverData // Disable editor when match is over
+                readOnly: !!matchOverData,
               }}
             />
           </div>
@@ -439,150 +538,184 @@ export default function RoomPage() {
           {consoleOpen && (
             <div className="flex-[2] border-t border-border flex flex-col min-h-0 bg-background">
               {/* Console header */}
-              <div className="flex items-center justify-between px-4 py-2 bg-surface border-b border-border shrink-0">
+              <div className="flex items-center justify-between px-4 py-2 bg-card border-b border-border shrink-0">
                 <div className="flex items-center gap-3">
-                  <span className="text-xs font-semibold text-foreground">Console</span>
+                  <span className="text-sm font-semibold text-foreground">
+                    Console
+                  </span>
                   {execResult && (
-                    <span className={`text-xs font-mono px-2 py-0.5 rounded-full ${
-                      execResult.allPassed
-                        ? "bg-success/15 text-success"
-                        : "bg-danger/15 text-danger"
-                    }`}>
-                      {execResult.passed}/{execResult.total} passed
-                    </span>
+                    <Badge
+                      variant={
+                        execResult.allPassed ? "outline" : "destructive"
+                      }
+                      className={
+                        execResult.allPassed
+                          ? "text-success border-success/30"
+                          : ""
+                      }
+                    >
+                      <span className="font-mono">
+                        {execResult.passed}/{execResult.total} passed
+                      </span>
+                    </Badge>
                   )}
                 </div>
-                <button
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
                   onClick={() => setConsoleOpen(false)}
-                  className="text-muted hover:text-foreground text-xs cursor-pointer transition-colors"
+                  className="cursor-pointer"
                 >
-                  ✕ Close
-                </button>
+                  <X className="size-4" />
+                </Button>
               </div>
 
               {/* Console body */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-2">
+              <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-2">
                 {(running || submitting) && (
-                  <div className="flex items-center gap-2 text-sm text-muted">
-                    <svg className="animate-spin h-4 w-4 text-primary" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                    </svg>
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="size-4 animate-spin text-primary" />
                     {submitting ? "Submitting..." : "Running tests..."}
                   </div>
                 )}
 
                 {execError && (
-                  <div className="text-sm text-danger bg-danger/10 border border-danger/20 rounded-lg p-3 font-mono">
+                  <div className="text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-lg p-3 font-mono">
                     ❌ {execError}
                   </div>
                 )}
 
-                {execResult && execResult.results.map((r) => (
-                  <div
-                    key={r.testCase}
-                    className={`rounded-lg border p-3 ${
-                      r.passed
-                        ? "bg-success/5 border-success/20"
-                        : r.status === "Skipped"
-                        ? "bg-muted/5 border-border"
-                        : "bg-danger/5 border-danger/20"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-semibold">
-                        {r.passed ? "✅" : r.status === "Skipped" ? "⏭️" : "❌"}{" "}
-                        Test Case {r.testCase}
-                      </span>
-                      <span className={`text-xs font-mono ${
-                        r.passed ? "text-success" : r.status === "Skipped" ? "text-muted" : "text-danger"
-                      }`}>
-                        {r.status}
-                        {r.time && ` · ${r.time}s`}
-                      </span>
-                    </div>
-
-                    {/* Compile error */}
-                    {r.compile_output && (
-                      <pre className="text-xs font-mono text-danger/80 mt-2 whitespace-pre-wrap break-words">
-                        {r.compile_output}
-                      </pre>
-                    )}
-
-                    {/* Runtime error */}
-                    {r.stderr && !r.compile_output && (
-                      <pre className="text-xs font-mono text-danger/80 mt-2 whitespace-pre-wrap break-words">
-                        {r.stderr}
-                      </pre>
-                    )}
-
-                    {/* Wrong answer: show stdout vs expected */}
-                    {!r.passed && !r.compile_output && !r.stderr && r.stdout && (
-                      <div className="mt-2 space-y-1 text-xs font-mono">
-                        <div><span className="text-muted">Output:   </span><span className="text-foreground">{r.stdout}</span></div>
-                        <div><span className="text-muted">Expected: </span><span className="text-success">{r.expected}</span></div>
+                {execResult &&
+                  execResult.results.map((r) => (
+                    <div
+                      key={r.testCase}
+                      className={`rounded-lg border p-3 ${
+                        r.passed
+                          ? "bg-success/5 border-success/20"
+                          : r.status === "Skipped"
+                          ? "bg-muted/5 border-border"
+                          : "bg-destructive/5 border-destructive/20"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-sm font-semibold flex items-center gap-1">
+                          {r.passed ? (
+                            <CheckCircle2 className="size-4 text-success" />
+                          ) : (
+                            <XCircle className="size-4 text-destructive" />
+                          )}
+                          Test Case {r.testCase}
+                        </span>
+                        <span
+                          className={`text-sm font-mono ${
+                            r.passed
+                              ? "text-success"
+                              : r.status === "Skipped"
+                              ? "text-muted-foreground"
+                              : "text-destructive"
+                          }`}
+                        >
+                          {r.status}
+                          {r.time && ` · ${r.time}s`}
+                        </span>
                       </div>
-                    )}
-                  </div>
-                ))}
+
+                      {/* Compile error */}
+                      {r.compile_output && (
+                        <pre className="text-sm font-mono text-destructive/80 mt-2 whitespace-pre-wrap break-words">
+                          {r.compile_output}
+                        </pre>
+                      )}
+
+                      {/* Runtime error */}
+                      {r.stderr && !r.compile_output && (
+                        <pre className="text-sm font-mono text-destructive/80 mt-2 whitespace-pre-wrap break-words">
+                          {r.stderr}
+                        </pre>
+                      )}
+
+                      {/* Wrong answer */}
+                      {!r.passed &&
+                        !r.compile_output &&
+                        !r.stderr &&
+                        r.stdout && (
+                          <div className="mt-2 flex flex-col gap-1 text-sm font-mono">
+                            <div>
+                              <span className="text-muted-foreground">
+                                Output:{" "}
+                              </span>
+                              <span className="text-foreground">
+                                {r.stdout}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">
+                                Expected:{" "}
+                              </span>
+                              <span className="text-success">
+                                {r.expected}
+                              </span>
+                            </div>
+                          </div>
+                        )}
+                    </div>
+                  ))}
               </div>
             </div>
           )}
 
           {/* Action Buttons */}
-          <div className="flex items-center justify-between px-4 py-3 bg-surface border-t border-border shrink-0">
+          <div className="flex items-center justify-between px-4 py-3 bg-card border-t border-border shrink-0">
             <div className="flex items-center gap-3">
-              <span className="text-xs text-muted font-mono">{language.toUpperCase()}</span>
+              <Badge variant="outline" className="font-mono">
+                {language.toUpperCase()}
+              </Badge>
               {consoleOpen && execResult && (
-                <span className="text-xs text-muted">
-                  {execResult.allPassed ? "🎉 All tests passed!" : `${execResult.passed}/${execResult.total} tests passed`}
+                <span className="text-sm text-muted-foreground">
+                  {execResult.allPassed
+                    ? "🎉 All tests passed!"
+                    : `${execResult.passed}/${execResult.total} tests passed`}
                 </span>
               )}
             </div>
             <div className="flex gap-3">
-              <button
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={() => executeCode(false)}
                 disabled={running || submitting || !!matchOverData}
-                className="px-5 py-2 rounded-xl text-sm font-medium cursor-pointer
-                           bg-background border border-border text-foreground
-                           hover:bg-surface-hover hover:border-border-hover
-                           disabled:opacity-50 disabled:cursor-not-allowed
-                           transition-all duration-200"
+                className="cursor-pointer"
               >
                 {running ? (
-                  <span className="inline-flex items-center gap-2">
-                    <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                    </svg>
+                  <>
+                    <Loader2 className="size-4 animate-spin" />
                     Running...
-                  </span>
+                  </>
                 ) : (
-                  "▶ Run Code"
+                  <>
+                    <Play className="size-4" />
+                    Run Code
+                  </>
                 )}
-              </button>
-              <button
+              </Button>
+              <Button
+                size="sm"
                 onClick={() => executeCode(true)}
                 disabled={running || submitting || !!matchOverData}
-                className="px-5 py-2 rounded-xl text-sm font-semibold text-white cursor-pointer
-                           bg-gradient-to-r from-success to-success/80
-                           hover:from-success hover:to-success
-                           disabled:opacity-50 disabled:cursor-not-allowed
-                           transition-all duration-300
-                           shadow-lg shadow-success/20 hover:shadow-success/40"
+                className="cursor-pointer bg-success text-white hover:bg-success/80"
               >
                 {submitting ? (
-                  <span className="inline-flex items-center gap-2">
-                    <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                    </svg>
+                  <>
+                    <Loader2 className="size-4 animate-spin" />
                     Submitting...
-                  </span>
+                  </>
                 ) : (
-                  "Submit ✓"
+                  <>
+                    <CheckCircle2 className="size-4" />
+                    Submit
+                  </>
                 )}
-              </button>
+              </Button>
             </div>
           </div>
         </section>
